@@ -493,7 +493,24 @@ fn no_guarantor_or_no_accounts_is_no_patient_id() {
         // The other readers need no patient id, and never ask for it.
         readers::accounts_list(&site).unwrap();
         readers::bills_list(&site, None, false, &RangeArgs::default()).unwrap();
+        if op == "payableGuarantors" {
+            let e = readers::patients(&site).err().unwrap();
+            assert!(e.to_string().contains("named no guarantor"), "{e}");
+        }
     }
+    // A portal that fails the query is its own error, which says to retry.
+    let mut routes = fixture_routes();
+    routes.insert(
+        "POST graphql payableGuarantors".into(),
+        (503, "text/html", "<p>unavailable</p>".into()),
+    );
+    let server = serve(routes, None);
+    let failing = env(&server, "guarantor-503");
+    let site = Site::open(&failing, &adult1()).unwrap();
+    let e = readers::patients(&site).err().unwrap();
+    assert_eq!(e.exit_code(), 5);
+    assert!(e.to_string().contains("HTTP 503"), "{e}");
+    assert!(!e.to_string().contains("guarantor"), "{e}");
     let server = serve(fixture_routes(), None);
     let env = env(&server, "no-guarantor-read");
     let site = Site::open(&env, &adult1()).unwrap();

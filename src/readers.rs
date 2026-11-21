@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use pk_cli_core::private_file::{self, Replace};
-use pk_cli_core::{CliError, RangeArgs};
+use pk_cli_core::{CliError, RangeArgs, Reason};
 use pk_cli_documents::{Document, DownloadBatch, SavedDocument, SkippedDocument};
 use pk_med_records::dto::{kind, method, relationship};
 use pk_med_records::stream::skip;
@@ -76,7 +76,8 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 /// [`book`] with the patient's id, for `patients list` and `records
 /// export`. A sign-in with no accounts is exit 4. Accounts naming no
 /// guarantor, or a portal that refuses the guarantor query, are exit 5,
-/// since no id would stay the same from one run to the next.
+/// since no id would stay the same from one run to the next; any other
+/// failure of that query is the client's own error.
 pub fn patient_book(site: &Site) -> Result<Book, CliError> {
     let mut book = book(site)?;
     if book.accounts.is_empty() {
@@ -91,9 +92,11 @@ pub fn patient_book(site: &Site) -> Result<Book, CliError> {
             "the portal may have changed; `{BIN} api POST /graphql` shows its answer"
         ))
     };
+    // A refusal of the query (GraphQL errors, an HTTP 400) is the field
+    // refused; a 429 or 5xx keeps its own message, which says to retry.
     let guarantors = match site.guarantors() {
         Ok(g) => g,
-        Err(e) if e.exit_code() == 5 => return Err(no_guarantor()),
+        Err(e) if e.reason() == Some(Reason::BadRequest) => return Err(no_guarantor()),
         Err(e) => return Err(e),
     };
     // The smallest, should the accounts name more than one guarantor.
