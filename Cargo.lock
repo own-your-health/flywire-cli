@@ -805,6 +805,7 @@ name = "flywire-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "base64 0.22.1",
  "clap",
  "clap_complete",
  "libc",
@@ -812,6 +813,7 @@ dependencies = [
  "pk-cli-browser",
  "pk-cli-config",
  "pk-cli-core",
+ "pk-cli-documents",
  "pk-cli-http",
  "pk-cli-secrets",
  "pk-cli-selfupdate",
@@ -1575,6 +1577,16 @@ source = "git+https://github.com/piekstra/cli-common?tag=v0.33.4#d28671eb0e01998
 dependencies = [
  "clap",
  "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "pk-cli-documents"
+version = "0.33.4"
+source = "git+https://github.com/piekstra/cli-common?tag=v0.33.4#d28671eb0e0199826d58d247bd8b60ddbc855a56"
+dependencies = [
+ "pk-cli-core",
  "serde",
  "serde_json",
 ]

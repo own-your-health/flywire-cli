@@ -1,0 +1,48 @@
+{
+  "data": {
+    "bill": {
+      "visitNumber": "VISIT-0000001",
+      "accountNumber": "ACCT-0000001",
+      "aTotalBilled": 25000,
+      "insuranceAmount": 15000,
+      "aTotalInsuranceAdjustments": 5000,
+      "aPatientPayments": 500,
+      "aTotalPatientAdjustments": 0,
+      "aPendingInsurance": 0,
+      "aInsuranceResp": 15000,
+      "planCoverages": [
+        {
+          "payer": "Example Health Plan",
+          "priority": 1,
+          "insuranceName": "Example Health Plan PPO",
+          "insurancePlan": "PPO"
+        }
+      ],
+      "charges": [
+        {
+          "amount": 20000,
+          "date": "2026-01-05",
+          "description": "Office visit, established patient",
+          "cptCode": {
+            "code": "99213",
+            "translation": "Office or outpatient visit"
+          },
+          "revenueCode": null
+        },
+        {
+          "amount": 5000,
+          "date": "2026-01-05",
+          "description": "Blood draw",
+          "cptCode": {
+            "code": 36415,
+            "translation": "Venipuncture"
+          },
+          "revenueCode": {
+            "code": 300,
+            "translation": "Laboratory"
+          }
+        }
+      ]
+    }
+  }
+}

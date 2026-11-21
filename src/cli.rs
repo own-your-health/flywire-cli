@@ -1,4 +1,4 @@
-//! The command tree (piekstra-cli/1).
+//! The command tree (piekstra-cli/1, health-records/v1, documents/v1).
 
 use std::path::PathBuf;
 
@@ -6,7 +6,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use pk_cli_auth::LoginArgs;
 use pk_cli_browser::BrowserArgs;
-use pk_cli_core::CommonArgs;
+use pk_cli_core::{CommonArgs, RangeArgs};
 use pk_cli_selfupdate::SelfUpdateArgs;
 
 pub const BIN: &str = "flywire";
@@ -50,6 +50,26 @@ pub enum Command {
     /// The logins: one profile per portal sign-in (profile-list/v1).
     #[command(subcommand)]
     Profiles(ProfilesCmd),
+    /// The patient the sign-in is (patient-list/v1).
+    #[command(subcommand)]
+    Patients(PatientsCmd),
+    /// The accounts the sign-in shows, with what is owed on each.
+    #[command(subcommand)]
+    Accounts(AccountsCmd),
+    /// Bills: the visits billed on an account, with their charges, what
+    /// insurance paid and adjusted, and what the patient owes.
+    #[command(subcommand)]
+    Bills(BillsCmd),
+    /// Payments made on an account.
+    #[command(subcommand)]
+    Payments(PaymentsCmd),
+    /// Bills, payments and statements as FHIR in records-stream/v1, for
+    /// `medrec import --from flywire`.
+    #[command(subcommand)]
+    Records(RecordsCmd),
+    /// Past statements (documents/v1).
+    #[command(subcommand)]
+    Documents(DocumentsCmd),
     /// One read of the profile's portal as --profile <NAME>, printed as it
     /// answers: `POST /graphql --data '{"query": "query ..."}'`, or `GET
     /// <PATH>`. Read-only: a mutation, a query that does more than read, and
@@ -169,4 +189,141 @@ pub enum ConfigCmd {
     Path,
     /// Show the effective configuration.
     Show,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PatientsCmd {
+    /// The patient the sign-in is, with its id for `records export
+    /// --patient` (patient-list/v1).
+    #[command(visible_alias = "ls")]
+    List,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AccountsCmd {
+    /// Each account: its number, the provider, what is owed and how many
+    /// bills (account-list/v1).
+    #[command(visible_alias = "ls")]
+    List,
+}
+
+#[derive(Args, Debug)]
+pub struct AccountArg {
+    /// Only this account: its id or number from `flywire accounts list`.
+    #[arg(long, value_name = "ID")]
+    pub account: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum BillsCmd {
+    /// One row per bill, newest service first, open and closed (bill-list/v1).
+    #[command(visible_alias = "ls")]
+    List(BillsListArgs),
+    /// One bill with its totals, the plans that covered it and its charges
+    /// (bill/v1).
+    Show(BillShowArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct BillsListArgs {
+    #[command(flatten)]
+    pub account: AccountArg,
+    /// Only bills the patient still owes on.
+    #[arg(long)]
+    pub open: bool,
+    #[command(flatten)]
+    pub range: RangeArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct BillShowArgs {
+    /// The bill's id from `flywire bills list`.
+    pub id: String,
+    #[command(flatten)]
+    pub account: AccountArg,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PaymentsCmd {
+    /// Payments, newest first, with whether each settled (payment-list/v1).
+    #[command(visible_alias = "ls")]
+    List(PaymentsListArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct PaymentsListArgs {
+    #[command(flatten)]
+    pub account: AccountArg,
+    #[command(flatten)]
+    pub range: RangeArgs,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RecordsCmd {
+    /// The sign-in's bills, payments and statements as records-stream/v1.
+    Export(ExportArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ExportArgs {
+    /// The patient: the id from `flywire patients list`. A sign-in is one
+    /// patient, so it may be omitted.
+    #[arg(long, value_name = "ID")]
+    pub patient: Option<String>,
+    /// The provider: the organization id from `flywire patients list`. A
+    /// sign-in reads one provider, so it may be omitted.
+    #[arg(long, value_name = "ORG")]
+    pub org: Option<String>,
+    /// Only bills with a service on or after this day, and payments and
+    /// statements dated on or after it (YYYY-MM-DD). The organization, the
+    /// patient and the accounts are always included.
+    #[arg(long, value_name = "YYYY-MM-DD")]
+    pub since: Option<String>,
+    /// Write the stream to stdout, which `medrec import --from flywire` reads. The
+    /// stream is the output, so --json with it is a usage error.
+    #[arg(long, conflicts_with = "output")]
+    pub ndjson: bool,
+    /// Write the stream to DIR/records.ndjson instead (tests and synthetic
+    /// data only: real records go straight into medrec).
+    #[arg(short, long, value_name = "DIR")]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DocumentsCmd {
+    /// Past statements, newest first (document-list/v1).
+    #[command(visible_alias = "ls")]
+    List(DocumentsListArgs),
+    /// Save one statement, or every one with --all (document-download/v1,
+    /// document-download-batch/v1).
+    Download(DownloadArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct DocumentsListArgs {
+    #[command(flatten)]
+    pub account: AccountArg,
+    #[command(flatten)]
+    pub range: RangeArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct DownloadArgs {
+    /// The document's id from `flywire documents list`.
+    #[arg(required_unless_present = "all", conflicts_with = "all")]
+    pub id: Option<String>,
+    /// Save every listed statement into the directory -o names.
+    #[arg(long, requires = "output")]
+    pub all: bool,
+    /// Where to write: a file or a directory for one statement (default:
+    /// its own name in the current directory), a directory for --all.
+    #[arg(short, long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace a file that is already there.
+    #[arg(long)]
+    pub overwrite: bool,
+    #[command(flatten)]
+    pub account: AccountArg,
+    #[command(flatten)]
+    pub range: RangeArgs,
 }

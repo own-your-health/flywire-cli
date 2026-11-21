@@ -9,5 +9,8 @@ pub mod cli;
 pub mod client;
 pub mod graphql;
 pub mod portal;
+pub mod queries;
+pub mod readers;
+pub mod reads;
 pub mod session;
 pub mod site;

@@ -14,3 +14,21 @@
   request. `api GET <PATH>` reads a path on the portal; payment, sign-in,
   subscription and settings paths are refused.
 - `config path|show`, `info`, `completions`, `self-update`.
+- The bill readers, each taking `--profile`: `patients list`, `accounts
+  list`, `bills list [--open] [--account] [--since] [--until] [--limit]`,
+  `bills show <ID>`, `payments list`, `documents list` and `documents
+  download <ID>|--all -o <DIR>` (documents/v1). They send the portal app's
+  own queries (`payables` with closed bills, `getSingleBill`,
+  `previousPayments`, `pastStatementsInfo`, `pastStatementsContent`),
+  trimmed to the fields read. An amount that is not whole cents is exit 5
+  naming the field.
+- `records export --ndjson` (records-stream/v1, `method: portal`): the
+  Organization, the Patient, the Accounts, an Invoice per bill with its
+  charges as contained ChargeItems and its amounts in
+  `urn:pk-med:bill-component`, settled payments as PaymentReconciliation,
+  and each statement as a DocumentReference followed by its Binary.
+  `-o <DIR>` writes a file, against a test's server only.
+- `info` lists the new commands and the `health-records/v1` and
+  `documents/v1` profiles.
+- `make dogfood` drives the installed binary through every command and
+  error path against a loopback server serving the synthetic fixtures.

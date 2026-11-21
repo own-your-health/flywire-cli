@@ -1,0 +1,16 @@
+{
+  "data": {
+    "previousPayments": [
+      {
+        "amount": 2000,
+        "date": "2026-01-20",
+        "status": "Paid",
+        "paymentMethod": {
+          "paymentType": "cash",
+          "paymentSubType": null,
+          "description": null
+        }
+      }
+    ]
+  }
+}

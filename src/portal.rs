@@ -8,8 +8,13 @@ use std::time::Duration;
 use pk_cli_config::profile::ProfileName;
 use pk_cli_core::CliError;
 
+use serde_json::json;
+
 use crate::client::{self, Answer, ApiRequest, Client};
+use crate::queries;
+use crate::reads::{self, BillDetail, PortalAccount, PortalPayment, PortalStatement, StatementFile};
 use crate::session::{Session, SessionStore};
+use crate::site::Provider;
 
 /// Where sessions are kept and which site is read.
 pub struct Env {
@@ -64,6 +69,53 @@ impl<'a> Site<'a> {
     /// [`client::api_request`].
     pub fn api(&self, request: &ApiRequest) -> Result<Answer, CliError> {
         self.client.api(request)
+    }
+
+    /// The provider whose portal this session signs in to.
+    pub fn provider(&self) -> &Provider {
+        &self.session.provider
+    }
+
+    /// The accounts, open and closed bills included (`payables`).
+    pub fn accounts(&self) -> Result<Vec<PortalAccount>, CliError> {
+        let data = self.query("payables", queries::PAYABLES, json!({ "filterClosedBills": false }))?;
+        reads::payables(&data)
+    }
+
+    /// One bill's page (`getSingleBill`).
+    pub fn bill_detail(&self, bill_id: &str) -> Result<BillDetail, CliError> {
+        let data = self.query("getSingleBill", queries::SINGLE_BILL, json!({ "id": bill_id }))?;
+        reads::bill_detail(&data)
+    }
+
+    /// The payments on one account (`previousPayments`).
+    pub fn payments(&self, account: &PortalAccount) -> Result<Vec<PortalPayment>, CliError> {
+        let data = self.query(
+            "previousPayments",
+            queries::PREVIOUS_PAYMENTS,
+            json!({ "payableIds": [account.id] }),
+        )?;
+        reads::payments(&data, &account.number)
+    }
+
+    /// One account's past statements (`pastStatementsInfo`).
+    pub fn statements(&self, account: &PortalAccount) -> Result<Vec<PortalStatement>, CliError> {
+        let data = self.query(
+            "pastStatementsInfo",
+            queries::PAST_STATEMENTS,
+            json!({ "payableIds": [account.id], "accountNumber": account.number }),
+        )?;
+        reads::statements(&data, &account.number)
+    }
+
+    /// One statement's file (`pastStatementsContent`).
+    pub fn statement_file(&self, statement_id: &str) -> Result<StatementFile, CliError> {
+        let data = self.query(
+            "pastStatementsContent",
+            queries::STATEMENT_CONTENT,
+            json!({ "statementId": statement_id }),
+        )?;
+        reads::statement_file(&data)
     }
 
     /// One query's `data` ([`Client::query`]).

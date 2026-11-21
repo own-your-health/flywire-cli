@@ -1,7 +1,7 @@
 BIN := flywire
 CARGO ?= cargo
 
-.PHONY: build release test lint fmt fmt-check clean install deps smoke verify dev
+.PHONY: build release test lint fmt fmt-check clean install deps smoke verify dev dogfood
 
 # Every target that produces a binary signs it (cli-common's dev-sign.sh), so
 # the code identity stays stable between builds. flywire keeps one keychain
@@ -62,11 +62,18 @@ smoke: build
 	@$(HERMETIC) ./target/debug/$(BIN) -q api GET /app/bills --profile smoke --json >/dev/null 2>&1; \
 		test $$? -eq 3 || { echo "smoke: api without a session did not exit 3"; exit 1; }
 	@for c in "auth login" "auth status" "auth logout" "auth reset" "profiles list" "profiles add" \
-		"profiles remove" "config path" "config show" api info; do \
+		"profiles remove" "config path" "config show" "patients list" "accounts list" "bills list" \
+		"bills show" "payments list" "records export" "documents list" "documents download" api info; do \
 		./target/debug/$(BIN) $$c --help >/dev/null || exit 1; done
 	@echo "smoke ok"
 
 verify: fmt-check lint test smoke
+
+# Every command and error path, on synthetic data, against the installed
+# flywire (or DOGFOOD_BIN=<path>). Not part of verify: it needs a keychain
+# and free local ports (scripts/dogfood.sh).
+dogfood:
+	@scripts/dogfood.sh $(DOGFOOD_BIN)
 
 define SIGN
 if [ -x "$$HOME/Dev/cli-common/scripts/dev-sign.sh" ]; then \

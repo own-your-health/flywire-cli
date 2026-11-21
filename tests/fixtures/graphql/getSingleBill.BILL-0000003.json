@@ -1,0 +1,17 @@
+{
+  "data": {
+    "bill": {
+      "visitNumber": null,
+      "accountNumber": "ACCT-0000001",
+      "aTotalBilled": 12000,
+      "insuranceAmount": null,
+      "aTotalInsuranceAdjustments": null,
+      "aPatientPayments": null,
+      "aTotalPatientAdjustments": null,
+      "aPendingInsurance": null,
+      "aInsuranceResp": null,
+      "planCoverages": [],
+      "charges": []
+    }
+  }
+}

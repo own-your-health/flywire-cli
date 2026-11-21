@@ -1,0 +1,72 @@
+{
+  "data": {
+    "payables": {
+      "payables": [
+        {
+          "id": "PAY-0000001",
+          "accountNumber": "ACCT-0000001",
+          "accountId": "ACCT-0000001",
+          "standingAmount": 4500,
+          "bills": [
+            {
+              "id": "BILL-0000001",
+              "admissionDate": "2026-01-05",
+              "amountDue": 4500,
+              "displayName": "Office visit",
+              "status": "open",
+              "claimNo": "CLM-0000001",
+              "aPendingInsurance": 0,
+              "rawVisitType": "PB"
+            },
+            {
+              "id": "BILL-0000002",
+              "admissionDate": "2026-01-10T00:00:00-05:00",
+              "amountDue": 0,
+              "displayName": "Lab work",
+              "status": "closed",
+              "claimNo": null,
+              "aPendingInsurance": 0,
+              "rawVisitType": "HB"
+            },
+            {
+              "id": "BILL-0000003",
+              "admissionDate": "2026-01-15",
+              "amountDue": 0,
+              "displayName": "Imaging",
+              "status": "voided",
+              "claimNo": null,
+              "aPendingInsurance": null,
+              "rawVisitType": "HB"
+            }
+          ],
+          "payee": {
+            "companyName": "Example Clinic LLC",
+            "companyDisplayName": "Example Clinic"
+          }
+        },
+        {
+          "id": "PAY-0000002",
+          "accountNumber": "ACCT-0000002",
+          "accountId": "ACCT-0000002",
+          "standingAmount": 0,
+          "bills": [
+            {
+              "id": "BILL-0000004",
+              "admissionDate": "2026-01-20",
+              "amountDue": 0,
+              "displayName": "Follow-up visit",
+              "status": "closed",
+              "claimNo": "CLM-0000004",
+              "aPendingInsurance": 1500,
+              "rawVisitType": "PB"
+            }
+          ],
+          "payee": {
+            "companyName": "Example Clinic LLC",
+            "companyDisplayName": "Example Clinic"
+          }
+        }
+      ]
+    }
+  }
+}
