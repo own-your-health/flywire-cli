@@ -20,7 +20,9 @@
   download <ID>|--all -o <DIR>` (documents/v1). They send the portal app's
   own queries (`payables` with closed bills, `getSingleBill`,
   `previousPayments`, `pastStatementsInfo`, `pastStatementsContent`),
-  trimmed to the fields read. An amount that is not whole cents is exit 5
+  trimmed to the fields read. `patients list` and `records export` also
+  read the accounts' guarantor id, by its own query, for a patient id that
+  holds while accounts come and go. An amount that is not whole cents is exit 5
   naming the field.
 - `records export --ndjson` (records-stream/v1, `method: portal`): the
   Organization, the Patient, the Accounts, an Invoice per bill with its

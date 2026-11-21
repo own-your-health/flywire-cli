@@ -29,9 +29,6 @@ pub struct PortalAccount {
     pub standing: Option<Cents>,
     /// The provider's name as the portal shows it (`payee`).
     pub payee: Option<String>,
-    /// The portal's id for the account's guarantor (`guarantor.externalId`):
-    /// personal data, used only hashed into the patient id.
-    pub guarantor: Option<String>,
     pub bills: Vec<PortalBill>,
 }
 
@@ -302,11 +299,22 @@ pub fn payables(data: &Value) -> Result<Vec<PortalAccount>, CliError> {
             number,
             standing: cents(p, "standingAmount", "payables")?,
             payee,
-            guarantor: p.get("guarantor").and_then(|g| text(g, "externalId")),
             bills,
         });
     }
     Ok(accounts)
+}
+
+/// `payableGuarantors`' `data`: each account's guarantor id
+/// (`guarantor.externalId`), personal data used only hashed into the
+/// patient id. Accounts naming none are left out.
+pub fn guarantors(data: &Value) -> Vec<String> {
+    let list = data.pointer("/payables/payables").and_then(Value::as_array);
+    list.map(Vec::as_slice)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|p| p.get("guarantor").and_then(|g| text(g, "externalId")))
+        .collect()
 }
 
 /// `getSingleBill`'s `data`.

@@ -39,23 +39,14 @@ const TAG_DISPLAY: &str = "Mapped by flywire from a Flywire patient portal";
 /// are about.
 pub struct Book {
     pub accounts: Vec<PortalAccount>,
-    /// The resources' ids; `patient_id` is empty when the portal named no
-    /// guarantor ([`Book::patient`]).
+    /// The resources' ids; `patient_id` is set only by [`patient_book`].
     pub mapper: Mapper,
 }
 
-/// The accounts, and the ids the resources carry.
+/// The accounts, and the ids the resources carry but the patient's.
 pub fn book(site: &Site) -> Result<Book, CliError> {
     let accounts = site.accounts()?;
     let provider = site.provider().as_str().to_string();
-    // The smallest, should the accounts name more than one guarantor.
-    let guarantor = accounts.iter().filter_map(|a| a.guarantor.as_deref()).min();
-    let patient_id = guarantor
-        .map(|g| {
-            let key = format!("{provider}\n{}\n{g}", site.profile());
-            id_of("patient", &format!("{provider}-{:016x}", fnv1a(key.as_bytes())))
-        })
-        .unwrap_or_default();
     let organization_name = accounts
         .iter()
         .find_map(|a| a.payee.clone())
@@ -68,7 +59,7 @@ pub fn book(site: &Site) -> Result<Book, CliError> {
             tag_system: TAG_SYSTEM.into(),
             tag_code: TAG_MAPPED.into(),
             tag_display: TAG_DISPLAY.into(),
-            patient_id,
+            patient_id: String::new(),
             organization_id: id_of("org", &provider),
             organization_name,
         },
@@ -82,26 +73,40 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
-impl Book {
-    /// The patient's id, for `patients list` and `records export`. A
-    /// sign-in with no accounts is exit 4; accounts naming no guarantor are
-    /// exit 5, since no id would stay the same from one run to the next.
-    pub fn patient(&self) -> Result<&str, CliError> {
-        if self.accounts.is_empty() {
-            return Err(CliError::NotFound("the sign-in shows no accounts".into())
-                .with_remedy(format!("`{BIN} accounts list --profile <NAME>` shows what it reads")));
-        }
-        if self.mapper.patient_id.is_empty() {
-            return Err(CliError::Upstream(
-                "the portal named no guarantor on the sign-in's accounts, so the patient has no stable id".into(),
-            )
-            .with_remedy(format!(
-                "the portal may have changed; `{BIN} api POST /graphql` shows its answer"
-            )));
-        }
-        Ok(&self.mapper.patient_id)
+/// [`book`] with the patient's id, for `patients list` and `records
+/// export`. A sign-in with no accounts is exit 4. Accounts naming no
+/// guarantor, or a portal that refuses the guarantor query, are exit 5,
+/// since no id would stay the same from one run to the next.
+pub fn patient_book(site: &Site) -> Result<Book, CliError> {
+    let mut book = book(site)?;
+    if book.accounts.is_empty() {
+        return Err(CliError::NotFound("the sign-in shows no accounts".into())
+            .with_remedy(format!("`{BIN} accounts list --profile <NAME>` shows what it reads")));
     }
+    let no_guarantor = || {
+        CliError::Upstream(
+            "the portal named no guarantor on the sign-in's accounts, so the patient has no stable id".into(),
+        )
+        .with_remedy(format!(
+            "the portal may have changed; `{BIN} api POST /graphql` shows its answer"
+        ))
+    };
+    let guarantors = match site.guarantors() {
+        Ok(g) => g,
+        Err(e) if e.exit_code() == 5 => return Err(no_guarantor()),
+        Err(e) => return Err(e),
+    };
+    // The smallest, should the accounts name more than one guarantor.
+    let Some(guarantor) = guarantors.iter().min() else {
+        return Err(no_guarantor());
+    };
+    let provider = site.provider().as_str();
+    let key = format!("{provider}\n{}\n{guarantor}", site.profile());
+    book.mapper.patient_id = id_of("patient", &format!("{provider}-{:016x}", fnv1a(key.as_bytes())));
+    Ok(book)
+}
 
+impl Book {
     /// The accounts `--account` names (its portal id or its number), or
     /// every one. An unknown one is exit 4.
     pub fn select(&self, account: Option<&str>) -> Result<Vec<&PortalAccount>, CliError> {
@@ -187,8 +192,7 @@ fn list(record: &str, items: Vec<Value>) -> Value {
 
 /// `patients list` (patient-list/v1): the one patient a sign-in is.
 pub fn patients(site: &Site) -> Result<Value, CliError> {
-    let book = book(site)?;
-    book.patient()?;
+    let book = patient_book(site)?;
     serde_json::to_value(pk_med_records::patient_list(vec![book.context()]))
         .map_err(|e| CliError::Other(format!("serializing: {e}")))
 }
@@ -629,8 +633,7 @@ pub fn export<W: Write>(
 ) -> Result<Finished, CliError> {
     let since = since.map(iso_day).transpose()?;
     let since = since.as_deref();
-    let book = book(site)?;
-    book.patient()?;
+    let book = patient_book(site)?;
     check_ids(&book, patient, org)?;
     let now = now_rfc3339();
     let mut w = RecordsWriter::start(out, &header(&book, origin, since))?;

@@ -10,7 +10,7 @@
 # data"): a vault key under the keychain service piekstra.flywire.dogfood,
 # created by the binary under test, so no keychain dialog, and removed at
 # the end with `auth reset --force`. It never reads the owner's sessions.
-# Ports DOGFOOD_PORT (default 8951) to DOGFOOD_PORT+2 must be free.
+# Ports DOGFOOD_PORT (default 8951) to DOGFOOD_PORT+3 must be free.
 set -u
 
 FW=${1:-$(command -v flywire || true)}
@@ -24,23 +24,25 @@ unset FLYWIRE_PROFILE FLYWIRE_BASE_URL
 P=${DOGFOOD_PORT:-8951}  # the fixtures
 Q=$((P + 1))             # signed out on payables, a GraphQL error on one bill
 R=$((P + 2))             # HTTP 500 on payables
+G=$((P + 3))             # the guarantor query refused
 DOWN=$((P + 8))          # nothing listens
 SERVER=(python3 -I "$HERE/fixture-server.py")
 "${SERVER[@]}" "$P" 2>"$T/server-$P.log" & S1=$!
 "${SERVER[@]}" "$Q" --answer getSingleBill.BILL-0000001=error.json --answer previousPayments=signedOut.json \
     2>"$T/server-$Q.log" & S2=$!
 "${SERVER[@]}" "$R" --status payables=500 2>"$T/server-$R.log" & S3=$!
+"${SERVER[@]}" "$G" --answer payableGuarantors=error.json 2>"$T/server-$G.log" & S4=$!
 
 cleanup() {
     exec 2>/dev/null  # no job notice for the servers killed
     "$FW" auth reset --force >/dev/null
-    kill "$S1" "$S2" "$S3" 2>/dev/null
+    kill "$S1" "$S2" "$S3" "$S4" 2>/dev/null
     wait 2>/dev/null
     rm -rf "$T"
 }
 trap cleanup EXIT
 
-for port in "$P" "$Q" "$R"; do
+for port in "$P" "$Q" "$R" "$G"; do
     up=
     for _ in $(seq 50); do
         curl -s -o /dev/null "http://127.0.0.1:$port/" && { up=1; break; }
@@ -167,6 +169,10 @@ value "a bill skipped, then signed out: trailer" "False upstream 3" "d['complete
 code "HTTP 500" 5 at "$R" "$FW" accounts list "${S[@]}"
 code "HTTP 500 before the stream" 5 at "$R" "$FW" records export "${S[@]}" --ndjson
 check "HTTP 500 before the stream: nothing on stdout" "0" "$(wc -c <"$T/out" | tr -d ' ')"
+code "guarantor refused: patients list" 5 at "$G" "$FW" patients list "${S[@]}"
+code "guarantor refused: records export" 5 at "$G" "$FW" records export "${S[@]}" --ndjson
+check "guarantor refused: nothing on stdout" "0" "$(wc -c <"$T/out" | tr -d ' ')"
+value "guarantor refused: bills list still reads" "4" "len(d['items'])" at "$G" "$FW" bills list "${S[@]}" --json
 code "server down" 5 at "$DOWN" "$FW" accounts list "${S[@]}"
 code "a base that is not loopback" 2 env FLYWIRE_BASE_URL=http://example.com "$FW" accounts list "${S[@]}"
 code "config path" 0 "$FW" config path

@@ -42,9 +42,6 @@
           "payee": {
             "companyName": "Example Clinic LLC",
             "companyDisplayName": "Example Clinic"
-          },
-          "guarantor": {
-            "externalId": "GUAR-0000001"
           }
         },
         {
@@ -67,9 +64,6 @@
           "payee": {
             "companyName": "Example Clinic LLC",
             "companyDisplayName": "Example Clinic"
-          },
-          "guarantor": {
-            "externalId": "GUAR-0000001"
           }
         }
       ]

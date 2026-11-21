@@ -421,6 +421,10 @@ fn patients_list_is_the_one_patient_the_sign_in_is() {
     assert_eq!(readers::patients(&site).unwrap()["items"][0]["id"], id);
     let ops = operations(&server);
     assert_eq!(ops[0], ("payables".into(), json!({"filterClosedBills": false})));
+    assert_eq!(
+        ops[1],
+        ("payableGuarantors".into(), json!({"filterClosedBills": false}))
+    );
 }
 
 fn patient_id(site: &Site) -> String {
@@ -437,14 +441,19 @@ fn the_patient_id_holds_while_accounts_come_and_go() {
     let id = patient_id(&Site::open(&env, &adult1()).unwrap());
 
     // A new account whose id sorts first, and the first one gone.
-    let mut payables: Value = serde_json::from_str(&fixture("payables.json")).unwrap();
-    let list = payables["data"]["payables"]["payables"].as_array_mut().unwrap();
-    let mut added = list[1].clone();
-    added["id"] = "PAY-0000000".into();
-    list.remove(0);
-    list.push(added);
     let mut routes = fixture_routes();
-    routes.insert("POST graphql payables".into(), (200, JSON, payables.to_string()));
+    for (op, file) in [
+        ("payables", "payables.json"),
+        ("payableGuarantors", "payableGuarantors.json"),
+    ] {
+        let mut v: Value = serde_json::from_str(&fixture(file)).unwrap();
+        let list = v["data"]["payables"]["payables"].as_array_mut().unwrap();
+        let mut added = list[1].clone();
+        added["id"] = "PAY-0000000".into();
+        list.remove(0);
+        list.push(added);
+        routes.insert(format!("POST graphql {op}"), (200, JSON, v.to_string()));
+    }
     let changed = serve(routes, None);
     let env2 = self::env(&changed, "patient-id-changed");
     assert_eq!(patient_id(&Site::open(&env2, &adult1()).unwrap()), id);
@@ -460,11 +469,17 @@ fn the_patient_id_holds_while_accounts_come_and_go() {
 
 #[test]
 fn no_guarantor_or_no_accounts_is_no_patient_id() {
-    let no_guarantor = fixture("payables.json").replace("\"externalId\": \"GUAR-0000001\"", "\"externalId\": null");
+    let guarantors = fixture("payableGuarantors.json");
     let none = r#"{"data":{"payables":{"payables":[]}}}"#.to_string();
-    for (payables, code) in [(no_guarantor, 5), (none, 4)] {
+    let cases = [
+        // No guarantor named, the guarantor query refused, no accounts.
+        ("payableGuarantors", guarantors.replace("\"GUAR-0000001\"", "null"), 5),
+        ("payableGuarantors", fixture("error.json"), 5),
+        ("payables", none, 4),
+    ];
+    for (op, answer, code) in cases {
         let mut routes = fixture_routes();
-        routes.insert("POST graphql payables".into(), (200, JSON, payables));
+        routes.insert(format!("POST graphql {op}"), (200, JSON, answer));
         let server = serve(routes, None);
         let env = env(&server, "no-patient");
         let site = Site::open(&env, &adult1()).unwrap();
@@ -475,9 +490,17 @@ fn no_guarantor_or_no_accounts_is_no_patient_id() {
             .unwrap();
         assert_eq!(e.exit_code(), code, "{e}");
         assert!(out.is_empty());
-        // The other readers need no patient id.
+        // The other readers need no patient id, and never ask for it.
         readers::accounts_list(&site).unwrap();
+        readers::bills_list(&site, None, false, &RangeArgs::default()).unwrap();
     }
+    let server = serve(fixture_routes(), None);
+    let env = env(&server, "no-guarantor-read");
+    let site = Site::open(&env, &adult1()).unwrap();
+    readers::accounts_list(&site).unwrap();
+    readers::payments_list(&site, None, &RangeArgs::default()).unwrap();
+    readers::documents(&site, None, &RangeArgs::default()).unwrap();
+    assert!(!operations(&server).iter().any(|(op, _)| op == "payableGuarantors"));
 }
 
 #[test]

@@ -87,6 +87,16 @@ impl<'a> Site<'a> {
         reads::payables(&data)
     }
 
+    /// The accounts' guarantor ids (`payableGuarantors`).
+    pub fn guarantors(&self) -> Result<Vec<String>, CliError> {
+        let data = self.query(
+            "payableGuarantors",
+            queries::GUARANTORS,
+            json!({ "filterClosedBills": false }),
+        )?;
+        Ok(reads::guarantors(&data))
+    }
+
     /// One bill's page (`getSingleBill`).
     pub fn bill_detail(&self, bill_id: &str) -> Result<BillDetail, CliError> {
         let data = self.query("getSingleBill", queries::SINGLE_BILL, json!({ "id": bill_id }))?;

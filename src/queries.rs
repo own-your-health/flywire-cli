@@ -4,12 +4,18 @@
 //! document.
 
 /// The accounts ("payables") and their bills. `filterClosedBills: false`
-/// asks for closed bills too; the app sends `true`. The guarantor's
-/// `externalId` keys the patient id and is never printed.
+/// asks for closed bills too; the app sends `true`.
 pub const PAYABLES: &str = "query payables($filterClosedBills: Boolean) { \
 payables(filterClosedBills: $filterClosedBills) { payables { id accountNumber accountId standingAmount \
 bills { id admissionDate amountDue displayName status claimNo aPendingInsurance rawVisitType } \
-payee { companyName companyDisplayName } guarantor { externalId } } } }";
+payee { companyName companyDisplayName } } } }";
+
+/// The same `payables`, trimmed to each account's guarantor, whose
+/// `externalId` keys the patient id and is never printed. Its own document,
+/// sent only by `patients list` and `records export`, so a portal that
+/// refuses the field fails those two and no other reader.
+pub const GUARANTORS: &str = "query payableGuarantors($filterClosedBills: Boolean) { \
+payables(filterClosedBills: $filterClosedBills) { payables { id guarantor { externalId } } } }";
 
 /// One bill's totals, the plans that covered it and its charges.
 pub const SINGLE_BILL: &str = "query getSingleBill($id: ID!) { bill(id: $id) { visitNumber accountNumber \
@@ -34,6 +40,7 @@ pastStatementsContent(id: $statementId) { imageFormat preview } }";
 /// Every document with its operation name, for the tests and `docs/api.md`.
 pub const ALL: &[(&str, &str)] = &[
     ("payables", PAYABLES),
+    ("payableGuarantors", GUARANTORS),
     ("getSingleBill", SINGLE_BILL),
     ("previousPayments", PREVIOUS_PAYMENTS),
     ("pastStatementsInfo", PAST_STATEMENTS),

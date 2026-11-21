@@ -1,0 +1,20 @@
+{
+  "data": {
+    "payables": {
+      "payables": [
+        {
+          "id": "PAY-0000001",
+          "guarantor": {
+            "externalId": "GUAR-0000001"
+          }
+        },
+        {
+          "id": "PAY-0000002",
+          "guarantor": {
+            "externalId": "GUAR-0000001"
+          }
+        }
+      ]
+    }
+  }
+}

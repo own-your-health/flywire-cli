@@ -10,14 +10,15 @@ a records store merges the same bill pulled twice.
 One sign-in is one patient at one provider. The stream's header names the
 organization `org-<provider>` and the patient `patient-<provider>-<hash>`,
 a hash of the provider, the flywire profile and the portal's id for the
-accounts' guarantor (`payables.guarantor.externalId`, the smallest if they
-name several). No number from the portal shows in it, and the header
+accounts' guarantor (`payables.guarantor.externalId`, read by its own
+query, the smallest if they name several). No number from the portal shows in it, and the header
 carries no name. The id stays the same while accounts are added or drop
 out and across sign-ins to the profile. It changes if the portal gives the
 guarantor another id, or for another profile: a profile reused for
 another person's accounts gets a new id rather than merging two people's
-records. Accounts that name no guarantor are exit 5, and a sign-in with
-no accounts exit 4, before the stream starts. `--patient` and `--org` must
+records. Accounts that name no guarantor, or a portal that refuses the
+guarantor query, are exit 5, and a sign-in with no accounts exit 4, before
+the stream starts. `--patient` and `--org` must
 be those ids (`patients list` shows them), or the export is exit 4 before
 it starts.
 
