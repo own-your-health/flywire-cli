@@ -73,7 +73,7 @@ verify: fmt-check lint test smoke
 # flywire (or DOGFOOD_BIN=<path>). Not part of verify: it needs a keychain
 # and free local ports (scripts/dogfood.sh).
 dogfood:
-	@scripts/dogfood.sh $(DOGFOOD_BIN)
+	@scripts/dogfood.sh $(if $(DOGFOOD_BIN),"$(DOGFOOD_BIN)")
 
 define SIGN
 if [ -x "$$HOME/Dev/cli-common/scripts/dev-sign.sh" ]; then \

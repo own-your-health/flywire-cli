@@ -29,6 +29,9 @@ pub struct PortalAccount {
     pub standing: Option<Cents>,
     /// The provider's name as the portal shows it (`payee`).
     pub payee: Option<String>,
+    /// The portal's id for the account's guarantor (`guarantor.externalId`):
+    /// personal data, used only hashed into the patient id.
+    pub guarantor: Option<String>,
     pub bills: Vec<PortalBill>,
 }
 
@@ -200,16 +203,25 @@ fn upstream(what: &str) -> CliError {
     ))
 }
 
+/// Ten trillion dollars, in cents: far beyond any bill, and small enough
+/// that any sum of the amounts flywire reads stays in an `i64`.
+const MAX_CENTS: i64 = 1_000_000_000_000_000;
+
 /// An amount in cents at `v[key]`, `what` naming it in an error.
 fn cents(v: &Value, key: &str, what: &str) -> Result<Option<Cents>, CliError> {
     match v.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::Number(n)) => {
+            // Bounded like the float path: no sum or `abs` of them overflows.
             if let Some(i) = n.as_i64() {
-                return Ok(Some(Cents(i)));
+                return if i.unsigned_abs() < MAX_CENTS as u64 {
+                    Ok(Some(Cents(i)))
+                } else {
+                    Err(upstream(&format!("{what}.{key}")))
+                };
             }
             match n.as_f64() {
-                Some(f) if f.is_finite() && f.fract() == 0.0 && f.abs() < 1e15 => Ok(Some(Cents(f as i64))),
+                Some(f) if f.is_finite() && f.fract() == 0.0 && f.abs() < MAX_CENTS as f64 => Ok(Some(Cents(f as i64))),
                 _ => Err(upstream(&format!("{what}.{key}"))),
             }
         }
@@ -290,6 +302,7 @@ pub fn payables(data: &Value) -> Result<Vec<PortalAccount>, CliError> {
             number,
             standing: cents(p, "standingAmount", "payables")?,
             payee,
+            guarantor: p.get("guarantor").and_then(|g| text(g, "externalId")),
             bills,
         });
     }
@@ -583,6 +596,10 @@ mod tests {
         assert_eq!(cents(&v, "c", "x").unwrap(), None);
         assert_eq!(cents(&v, "missing", "x").unwrap(), None);
         assert_eq!(taken_off(&v, "f", "x").unwrap(), Some(Cents(300)));
+        let huge = json!({"min": i64::MIN, "max": i64::MAX, "f": 1e300});
+        for key in ["min", "max", "f"] {
+            assert_eq!(taken_off(&huge, key, "x").err().unwrap().exit_code(), 5, "{key}");
+        }
         for bad in ["d", "e"] {
             let e = cents(&v, bad, "payables.bills").err().unwrap();
             assert_eq!(e.exit_code(), 5);

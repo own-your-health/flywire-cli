@@ -423,6 +423,63 @@ fn patients_list_is_the_one_patient_the_sign_in_is() {
     assert_eq!(ops[0], ("payables".into(), json!({"filterClosedBills": false})));
 }
 
+fn patient_id(site: &Site) -> String {
+    readers::patients(site).unwrap()["items"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn the_patient_id_holds_while_accounts_come_and_go() {
+    let server = serve(fixture_routes(), None);
+    let env = env(&server, "patient-id");
+    let id = patient_id(&Site::open(&env, &adult1()).unwrap());
+
+    // A new account whose id sorts first, and the first one gone.
+    let mut payables: Value = serde_json::from_str(&fixture("payables.json")).unwrap();
+    let list = payables["data"]["payables"]["payables"].as_array_mut().unwrap();
+    let mut added = list[1].clone();
+    added["id"] = "PAY-0000000".into();
+    list.remove(0);
+    list.push(added);
+    let mut routes = fixture_routes();
+    routes.insert("POST graphql payables".into(), (200, JSON, payables.to_string()));
+    let changed = serve(routes, None);
+    let env2 = self::env(&changed, "patient-id-changed");
+    assert_eq!(patient_id(&Site::open(&env2, &adult1()).unwrap()), id);
+
+    // Another profile is another patient id, so a profile reused for
+    // another person never merges two people's records.
+    let other = ProfileName::parse("adult2").unwrap();
+    env.sessions
+        .put(&other, &session("_simplee_store2=dummy1; dummy_other=x"))
+        .unwrap();
+    assert_ne!(patient_id(&Site::open(&env, &other).unwrap()), id);
+}
+
+#[test]
+fn no_guarantor_or_no_accounts_is_no_patient_id() {
+    let no_guarantor = fixture("payables.json").replace("\"externalId\": \"GUAR-0000001\"", "\"externalId\": null");
+    let none = r#"{"data":{"payables":{"payables":[]}}}"#.to_string();
+    for (payables, code) in [(no_guarantor, 5), (none, 4)] {
+        let mut routes = fixture_routes();
+        routes.insert("POST graphql payables".into(), (200, JSON, payables));
+        let server = serve(routes, None);
+        let env = env(&server, "no-patient");
+        let site = Site::open(&env, &adult1()).unwrap();
+        assert_eq!(readers::patients(&site).err().unwrap().exit_code(), code);
+        let mut out = Vec::new();
+        let e = readers::export(&site, &server.base, &mut out, None, None, None)
+            .err()
+            .unwrap();
+        assert_eq!(e.exit_code(), code, "{e}");
+        assert!(out.is_empty());
+        // The other readers need no patient id.
+        readers::accounts_list(&site).unwrap();
+    }
+}
+
 #[test]
 fn accounts_list_shows_what_is_owed_on_each() {
     let server = serve(fixture_routes(), None);
@@ -923,7 +980,7 @@ fn a_signed_out_portal_is_exit_3_before_anything_is_written() {
 }
 
 #[test]
-fn a_graphql_error_is_exit_5_and_ends_an_export_incomplete() {
+fn a_graphql_error_on_one_bill_is_exit_5_and_a_skip_in_the_export() {
     let mut routes = fixture_routes();
     routes.insert(
         "POST graphql getSingleBill BILL-0000001".into(),
@@ -940,10 +997,43 @@ fn a_graphql_error_is_exit_5_and_ends_an_export_incomplete() {
     );
     let mut out = Vec::new();
     let finished = readers::export(&site, &server.base, &mut out, None, None, None).unwrap();
+    assert!(finished.trailer.complete, "one bill does not stop the rest");
+    let (_, resources, trailer) = read_stream(&out);
+    assert_eq!(trailer.counts.get("Invoice"), Some(&3));
+    assert_eq!(trailer.counts.get("PaymentReconciliation"), Some(&2));
+    assert_eq!(trailer.counts.get("DocumentReference"), Some(&1));
+    assert!(!resources.iter().any(|r| r["id"] == "bill-ACCT-0000001-BILL-0000001"));
+    let skip = &trailer.skipped[0];
+    assert_eq!(
+        (skip.code.as_str(), skip.id.as_deref()),
+        ("upstream", Some("bill-ACCT-0000001-BILL-0000001"))
+    );
+    assert!(skip.reason.contains("1 GraphQL error"), "{}", skip.reason);
+    assert!(!skip.reason.contains("could not be loaded"), "{}", skip.reason);
+}
+
+#[test]
+fn a_session_that_ends_mid_export_ends_it_incomplete() {
+    let mut routes = fixture_routes();
+    routes.insert(
+        "POST graphql previousPayments PAY-0000001".into(),
+        (200, JSON, fixture("signedOut.json")),
+    );
+    let server = serve(routes, None);
+    let env = env(&server, "export-signed-out");
+    let site = Site::open(&env, &adult1()).unwrap();
+    let mut out = Vec::new();
+    let finished = readers::export(&site, &server.base, &mut out, None, None, None).unwrap();
+    let error = finished.trailer.error.as_ref().unwrap();
     assert!(!finished.trailer.complete);
-    assert_eq!(flywire::app::incomplete_exit(&finished.trailer), 5);
+    assert_eq!(error.exit_code, Some(3));
+    assert_eq!(flywire::app::incomplete_exit(&finished.trailer), 3);
     let text = String::from_utf8(out).unwrap();
     assert!(text.lines().last().unwrap().contains("\"complete\":false"));
+    assert!(
+        text.contains("\"resourceType\":\"Invoice\""),
+        "what was read before it is kept"
+    );
 }
 
 #[test]

@@ -99,7 +99,7 @@ ended it, a read exits 3 and prints the command that signs in again:
 | `payments list [--account <ID>] [--since\|--until <DAY>]` | `payment-list/v1`: amount, date, method, status and whether it settled |
 | `documents list` | `document-list/v1`: past statements with a file |
 | `documents download <ID>\|--all -o <DIR>` | `document-download/v1`, `document-download-batch/v1`: the statement's file, owner-only; `-o -` writes it to stdout |
-| `records export --ndjson [--patient <ID>] [--org <ORG>] [--since <DAY>]` | `records-stream/v1`: FHIR R4 Invoices with their charges, payments and statements (`docs/fhir.md`) |
+| `records export (--ndjson\|-o <DIR>) [--patient <ID>] [--org <ORG>] [--since <DAY>]` | `records-stream/v1`: FHIR R4 Invoices with their charges, payments and statements (`docs/fhir.md`); `-o` writes `DIR/records.ndjson`, against a test's server only |
 | `api POST /graphql --data '{"query": "query ..."}'` | the portal's answer, as it came; queries only |
 | `api GET <PATH>` | a path on the portal, as it came |
 | `info` | `cli-info/v1` |

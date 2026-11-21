@@ -4,10 +4,12 @@
 //! tests check it in-process against a loopback server.
 //!
 //! One sign-in is one patient at one provider: the portal's guest sign-in
-//! takes the patient's account number and date of birth. The patient's id
-//! is the provider with a hash of the portal's own id for the first account
-//! (the id itself never shows), and the organization's is the provider, so
-//! both are stable across runs.
+//! takes the patient's account number and date of birth. The organization's
+//! id is the provider. The patient's is the provider with a hash of the
+//! profile and the portal's id for the accounts' guarantor, so it holds
+//! while accounts come and go and across sign-ins to the profile, and a
+//! profile reused for another person's accounts gets another id rather than
+//! merging two people's records. The guarantor's id itself never shows.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -37,6 +39,8 @@ const TAG_DISPLAY: &str = "Mapped by flywire from a Flywire patient portal";
 /// are about.
 pub struct Book {
     pub accounts: Vec<PortalAccount>,
+    /// The resources' ids; `patient_id` is empty when the portal named no
+    /// guarantor ([`Book::patient`]).
     pub mapper: Mapper,
 }
 
@@ -44,11 +48,14 @@ pub struct Book {
 pub fn book(site: &Site) -> Result<Book, CliError> {
     let accounts = site.accounts()?;
     let provider = site.provider().as_str().to_string();
-    let first = accounts.iter().map(|a| a.id.as_str()).min();
-    let patient_id = match first {
-        Some(id) => id_of("patient", &format!("{provider}-{:016x}", fnv1a(id.as_bytes()))),
-        None => id_of("patient", &provider),
-    };
+    // The smallest, should the accounts name more than one guarantor.
+    let guarantor = accounts.iter().filter_map(|a| a.guarantor.as_deref()).min();
+    let patient_id = guarantor
+        .map(|g| {
+            let key = format!("{provider}\n{}\n{g}", site.profile());
+            id_of("patient", &format!("{provider}-{:016x}", fnv1a(key.as_bytes())))
+        })
+        .unwrap_or_default();
     let organization_name = accounts
         .iter()
         .find_map(|a| a.payee.clone())
@@ -76,6 +83,25 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 }
 
 impl Book {
+    /// The patient's id, for `patients list` and `records export`. A
+    /// sign-in with no accounts is exit 4; accounts naming no guarantor are
+    /// exit 5, since no id would stay the same from one run to the next.
+    pub fn patient(&self) -> Result<&str, CliError> {
+        if self.accounts.is_empty() {
+            return Err(CliError::NotFound("the sign-in shows no accounts".into())
+                .with_remedy(format!("`{BIN} accounts list --profile <NAME>` shows what it reads")));
+        }
+        if self.mapper.patient_id.is_empty() {
+            return Err(CliError::Upstream(
+                "the portal named no guarantor on the sign-in's accounts, so the patient has no stable id".into(),
+            )
+            .with_remedy(format!(
+                "the portal may have changed; `{BIN} api POST /graphql` shows its answer"
+            )));
+        }
+        Ok(&self.mapper.patient_id)
+    }
+
     /// The accounts `--account` names (its portal id or its number), or
     /// every one. An unknown one is exit 4.
     pub fn select(&self, account: Option<&str>) -> Result<Vec<&PortalAccount>, CliError> {
@@ -162,6 +188,7 @@ fn list(record: &str, items: Vec<Value>) -> Value {
 /// `patients list` (patient-list/v1): the one patient a sign-in is.
 pub fn patients(site: &Site) -> Result<Value, CliError> {
     let book = book(site)?;
+    book.patient()?;
     serde_json::to_value(pk_med_records::patient_list(vec![book.context()]))
         .map_err(|e| CliError::Other(format!("serializing: {e}")))
 }
@@ -559,9 +586,39 @@ fn invoice(book: &Book, b: &bill::Bill, visit: Option<&str>, claim: Option<&str>
     v
 }
 
+/// One read of the export: its value, or `None` once a failure that
+/// leaves only this item out (a 4 or a 5: the portal's error, an answer
+/// flywire cannot read) is written as a skip naming what it was. Anything
+/// else ends the export: a session that ended fails every later read too.
+fn or_skip<T, W: Write>(
+    w: &mut RecordsWriter<W>,
+    read: Result<T, CliError>,
+    resource_type: &str,
+    id: &str,
+    what: &str,
+) -> Result<Option<T>, CliError> {
+    let e = match read {
+        Ok(v) => return Ok(Some(v)),
+        Err(e) => e,
+    };
+    let code = match e.exit_code() {
+        4 => skip::NOT_FOUND,
+        5 => skip::UPSTREAM,
+        _ => return Err(e),
+    };
+    w.skip(Skip::resource(
+        resource_type,
+        id,
+        code,
+        format!("{what} could not be read: {}", e.message()),
+    ));
+    Ok(None)
+}
+
 /// `records export`: the stream on `out`. Nothing reaches `out` before the
 /// accounts are read, so a refused session is an ordinary error; once the
-/// header is out, a failure ends the stream with an incomplete trailer.
+/// header is out, one item the portal fails on is a skip ([`or_skip`]) and
+/// a session that ends ends the stream with an incomplete trailer.
 pub fn export<W: Write>(
     site: &Site,
     origin: &str,
@@ -573,6 +630,7 @@ pub fn export<W: Write>(
     let since = since.map(iso_day).transpose()?;
     let since = since.as_deref();
     let book = book(site)?;
+    book.patient()?;
     check_ids(&book, patient, org)?;
     let now = now_rfc3339();
     let mut w = RecordsWriter::start(out, &header(&book, origin, since))?;
@@ -601,7 +659,10 @@ pub fn export<W: Write>(
                 if since.is_some_and(|s| b.date.as_deref().is_some_and(|d| d < s)) {
                     continue;
                 }
-                let d = site.bill_detail(&b.id)?;
+                let id = m.bill_id(&a.number, &b.id);
+                let Some(d) = or_skip(&mut w, site.bill_detail(&b.id), "Invoice", &id, "the bill's page")? else {
+                    continue;
+                };
                 let Some(model) = reads::bill(a, b, Some(&d)) else {
                     w.skip(Skip::resource(
                         "Invoice",
@@ -622,7 +683,17 @@ pub fn export<W: Write>(
             let mut unsettled = 0;
             let mut undated = 0;
             let mut seen: BTreeMap<(String, i64), usize> = BTreeMap::new();
-            for p in site.payments(a)? {
+            let Some(payments) = or_skip(
+                &mut w,
+                site.payments(a),
+                "PaymentReconciliation",
+                "",
+                "an account's payments",
+            )?
+            else {
+                continue;
+            };
+            for p in payments {
                 if !p.is_settled() {
                     unsettled += 1;
                     continue;
@@ -657,7 +728,17 @@ pub fn export<W: Write>(
             }
         }
         for a in &book.accounts {
-            for s in site.statements(a)? {
+            let Some(statements) = or_skip(
+                &mut w,
+                site.statements(a),
+                "DocumentReference",
+                "",
+                "an account's statements",
+            )?
+            else {
+                continue;
+            };
+            for s in statements {
                 if !s.is_viewable() {
                     continue;
                 }
@@ -685,7 +766,10 @@ pub fn export<W: Write>(
                         ));
                         continue;
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        or_skip::<(), _>(&mut w, Err(e), "DocumentReference", &doc_id, "the statement's file")?;
+                        continue;
+                    }
                 };
                 let Some(format) = file.format else {
                     w.skip(Skip::resource(

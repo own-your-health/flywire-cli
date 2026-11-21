@@ -71,6 +71,11 @@ impl<'a> Site<'a> {
         self.client.api(request)
     }
 
+    /// The profile whose session this is.
+    pub fn profile(&self) -> &ProfileName {
+        &self.profile
+    }
+
     /// The provider whose portal this session signs in to.
     pub fn provider(&self) -> &Provider {
         &self.session.provider

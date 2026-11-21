@@ -388,15 +388,16 @@ pub fn export(cli: &Cli, env: &Env, profile: &ProfileName, args: &ExportArgs) ->
     let site = Site::open(env, profile)?;
     let origin = crate::client::origin(env.base.as_deref(), site.provider());
     let stdout = std::io::stdout();
-    match readers::export(&site, &origin, stdout.lock(), patient, org, since) {
-        Ok(f) if f.trailer.complete => {
-            site.finish_quietly();
-            Ok(0)
-        }
+    let finished = readers::export(&site, &origin, stdout.lock(), patient, org, since)?;
+    // The cookies the reads refreshed are kept whether or not the stream
+    // finished, as with -o.
+    site.finish_quietly();
+    Ok(if finished.trailer.complete {
+        0
+    } else {
         // The trailer carries the error; exit without a second document.
-        Ok(f) => Ok(incomplete_exit(&f.trailer)),
-        Err(e) => Err(e),
-    }
+        incomplete_exit(&finished.trailer)
+    })
 }
 
 fn export_to_dir(

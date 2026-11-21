@@ -93,7 +93,7 @@ The documents are the app's own, trimmed to these fields
 
 | Command | Queries | Fields used |
 |---|---|---|
-| `patients list` | `payables(filterClosedBills: false)` | `payables.id` (hashed into the patient id), `payee.companyDisplayName` or `companyName` (the organization's name) |
+| `patients list` | `payables(filterClosedBills: false)` | `guarantor.externalId` (hashed with the provider and the profile into the patient id, never printed), `payee.companyDisplayName` or `companyName` (the organization's name) |
 | `accounts list` | `payables(filterClosedBills: false)` | `id`, `accountNumber` (else `accountId`), `standingAmount`, `payee`, and each bill's `amountDue` and `aPendingInsurance` |
 | `bills list [--open] [--since] [--until] [--account]` | `payables(filterClosedBills: false)` | each bill's `id`, `displayName`, `admissionDate`, `amountDue`, `aPendingInsurance`, `status`, `claimNo`, `rawVisitType` |
 | `bills show <ID>` | `payables`, then `bill(id)` (`getSingleBill`) | the bill's row, then `visitNumber`, `aTotalBilled`, `insuranceAmount`, `aTotalInsuranceAdjustments`, `aPatientPayments`, `aTotalPatientAdjustments`, `aPendingInsurance`, `aInsuranceResp`, `planCoverages { payer priority insuranceName insurancePlan }`, `charges { amount date description cptCode { code translation } revenueCode { code translation } }` |
@@ -152,9 +152,10 @@ first signed-in answers:
 - whether amounts ever arrive as fractional numbers or strings;
 - the values of `imageFormat` and the encoding of `preview`;
 - whether a visitor is refused `payableStandingAmount` (the session check);
-- whether `payables` lists one patient's accounts only, and whether the
-  smallest `payables.id`, from which the patient id is derived, stays the
-  same across sign-ins.
+- whether a guest sign-in is answered `guarantor.externalId`, whether it
+  stays the same across sign-ins, and whether `payables` lists one
+  patient's accounts only (a guarantor responsible for two patients at a
+  provider would put both under one patient id).
 
 ## Read-only
 

@@ -4,11 +4,12 @@
 //! document.
 
 /// The accounts ("payables") and their bills. `filterClosedBills: false`
-/// asks for closed bills too; the app sends `true`.
+/// asks for closed bills too; the app sends `true`. The guarantor's
+/// `externalId` keys the patient id and is never printed.
 pub const PAYABLES: &str = "query payables($filterClosedBills: Boolean) { \
 payables(filterClosedBills: $filterClosedBills) { payables { id accountNumber accountId standingAmount \
 bills { id admissionDate amountDue displayName status claimNo aPendingInsurance rawVisitType } \
-payee { companyName companyDisplayName } } } }";
+payee { companyName companyDisplayName } guarantor { externalId } } } }";
 
 /// One bill's totals, the plans that covered it and its charges.
 pub const SINGLE_BILL: &str = "query getSingleBill($id: ID!) { bill(id: $id) { visitNumber accountNumber \

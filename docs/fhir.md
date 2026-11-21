@@ -8,11 +8,24 @@ mapped. Ids are stable across runs, derived from the site's own numbers, so
 a records store merges the same bill pulled twice.
 
 One sign-in is one patient at one provider. The stream's header names the
-organization `org-<provider>` and the patient
-`patient-<provider>-<hash>`, the hash of the portal's own id for the
-sign-in's first account, so no number from the portal shows in it; the
-header carries no name. `--patient` and `--org` must be those ids
-(`patients list` shows them), or the export is exit 4 before it starts.
+organization `org-<provider>` and the patient `patient-<provider>-<hash>`,
+a hash of the provider, the flywire profile and the portal's id for the
+accounts' guarantor (`payables.guarantor.externalId`, the smallest if they
+name several). No number from the portal shows in it, and the header
+carries no name. The id stays the same while accounts are added or drop
+out and across sign-ins to the profile. It changes if the portal gives the
+guarantor another id, or for another profile: a profile reused for
+another person's accounts gets a new id rather than merging two people's
+records. Accounts that name no guarantor are exit 5, and a sign-in with
+no accounts exit 4, before the stream starts. `--patient` and `--org` must
+be those ids (`patients list` shows them), or the export is exit 4 before
+it starts.
+
+Once the header is out, an item the portal fails on (a bill's page, an
+account's payments or statements, a statement's file) is left out with a
+skip, `upstream` or `not_found`, naming the resource and the failure but
+never the answer's text; the stream goes on. A session that ends mid-way
+ends the stream with an incomplete trailer and exit 3.
 
 | What the site shows | FHIR | Notes |
 |---|---|---|

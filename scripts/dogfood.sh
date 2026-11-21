@@ -23,12 +23,13 @@ unset FLYWIRE_PROFILE FLYWIRE_BASE_URL
 
 P=${DOGFOOD_PORT:-8951}  # the fixtures
 Q=$((P + 1))             # signed out on payables, a GraphQL error on one bill
-R=$((P + 2))             # HTTP 500 on payables, 429 on one statement
+R=$((P + 2))             # HTTP 500 on payables
 DOWN=$((P + 8))          # nothing listens
-SERVER="python3 -I $HERE/fixture-server.py"
-$SERVER "$P" 2>/dev/null & S1=$!
-$SERVER "$Q" --answer getSingleBill.BILL-0000001=error.json --answer previousPayments=signedOut.json 2>/dev/null & S2=$!
-$SERVER "$R" --status payables=500 2>/dev/null & S3=$!
+SERVER=(python3 -I "$HERE/fixture-server.py")
+"${SERVER[@]}" "$P" 2>"$T/server-$P.log" & S1=$!
+"${SERVER[@]}" "$Q" --answer getSingleBill.BILL-0000001=error.json --answer previousPayments=signedOut.json \
+    2>"$T/server-$Q.log" & S2=$!
+"${SERVER[@]}" "$R" --status payables=500 2>"$T/server-$R.log" & S3=$!
 
 cleanup() {
     exec 2>/dev/null  # no job notice for the servers killed
@@ -40,10 +41,16 @@ cleanup() {
 trap cleanup EXIT
 
 for port in "$P" "$Q" "$R"; do
+    up=
     for _ in $(seq 50); do
-        curl -s -o /dev/null "http://127.0.0.1:$port/" && break
+        curl -s -o /dev/null "http://127.0.0.1:$port/" && { up=1; break; }
         sleep 0.1
     done
+    if [ -z "$up" ]; then
+        echo "the fixture server on port $port did not start:" >&2
+        cat "$T/server-$port.log" >&2
+        exit 1
+    fi
 done
 
 fails=0
@@ -155,8 +162,8 @@ code "api: another host" 2 at "$P" "$FW" api GET https://example.com/app/bills "
 code "GraphQL error on a bill" 5 at "$Q" "$FW" bills show BILL-0000001 "${S[@]}"
 check "GraphQL error: its text not printed" "0" "$(grep -c 'could not be loaded' "$T/err")"
 code "signed out mid-read" 3 at "$Q" "$FW" payments list "${S[@]}"
-code "GraphQL error mid-export" 5 at "$Q" "$FW" records export "${S[@]}" --ndjson
-value "GraphQL error mid-export: trailer" "False" "d['complete']" at "$Q" "$FW" records export "${S[@]}" --ndjson
+code "signed out mid-export" 3 at "$Q" "$FW" records export "${S[@]}" --ndjson
+value "a bill skipped, then signed out: trailer" "False upstream 3" "d['complete'], d['skipped'][0]['code'], d['error']['exit_code']" at "$Q" "$FW" records export "${S[@]}" --ndjson
 code "HTTP 500" 5 at "$R" "$FW" accounts list "${S[@]}"
 code "HTTP 500 before the stream" 5 at "$R" "$FW" records export "${S[@]}" --ndjson
 check "HTTP 500 before the stream: nothing on stdout" "0" "$(wc -c <"$T/out" | tr -d ' ')"
