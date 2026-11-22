@@ -30,6 +30,7 @@ struct Seen {
     target: String,
     cookie: Option<String>,
     user_agent: Option<String>,
+    source: Option<String>,
     body: String,
 }
 
@@ -37,8 +38,10 @@ struct Seen {
 /// (`GET /path`); a `POST /graphql` by its `operationName`, first with the
 /// id its variables name (`POST graphql <operationName> <id>`: `id`,
 /// `statementId` or the first of `payableIds`), then without
-/// (`POST graphql <operationName>`); anything else is a 404. `set_cookie`
-/// goes on every answer.
+/// (`POST graphql <operationName>`); anything else is a 404. A `POST
+/// /graphql` without `source: patient-client` is answered as the portal
+/// answers it, HTTP 400 `{"errors":"no source found"}`. `set_cookie` goes on
+/// every answer.
 struct Server {
     base: String,
     seen: Arc<Mutex<Vec<Seen>>>,
@@ -81,8 +84,11 @@ fn serve(routes: Routes, set_cookie: Option<&'static str>) -> Server {
                 target: target.clone(),
                 cookie: header("cookie"),
                 user_agent: header("user-agent"),
+                source: header("source"),
                 body: body.clone(),
             });
+            let sourceless =
+                method == "POST" && target == "/graphql" && header("source").as_deref() != Some("patient-client");
             let keys = if method == "POST" && target == "/graphql" {
                 let doc = serde_json::from_str::<Value>(&body).unwrap_or_default();
                 let op = doc["operationName"].as_str().unwrap_or_default().to_string();
@@ -99,11 +105,15 @@ fn serve(routes: Routes, set_cookie: Option<&'static str>) -> Server {
             } else {
                 vec![format!("{method} {target}")]
             };
-            let (status, mime, body) = keys.iter().find_map(|k| routes.get(k).cloned()).unwrap_or((
-                404,
-                "text/html",
-                "<p>not found</p>".to_string(),
-            ));
+            let (status, mime, body) = if sourceless {
+                (400, JSON, r#"{"errors":"no source found"}"#.to_string())
+            } else {
+                keys.iter().find_map(|k| routes.get(k).cloned()).unwrap_or((
+                    404,
+                    "text/html",
+                    "<p>not found</p>".to_string(),
+                ))
+            };
             let mut answer = format!(
                 "HTTP/1.1 {status} X\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n",
                 body.len()
@@ -205,6 +215,7 @@ fn a_query_posts_the_document_with_the_session_s_headers() {
     assert_eq!((seen[0].method.as_str(), seen[0].target.as_str()), ("POST", "/graphql"));
     assert_eq!(seen[0].cookie.as_deref(), Some("_simplee_store2=dummy1; dummy_other=x"));
     assert_eq!(seen[0].user_agent.as_deref(), Some("Mozilla/5.0 (test)"));
+    assert_eq!(seen[0].source.as_deref(), Some("patient-client"));
     let body: Value = serde_json::from_str(&seen[0].body).unwrap();
     assert_eq!(body["operationName"], "payableStandingAmount");
     assert_eq!(body["query"], STANDING);
