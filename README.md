@@ -9,7 +9,7 @@ systems send their statements from (`https://<provider>.simpleepay.com`,
 emails from `email@hc.flywire.com`). It signs in as you, reads what the
 portal shows you, and prints it or writes it as FHIR R4 for a personal
 medical-records store (`records-stream/v1`, the `health-records/v1` profile
-of [medical-common](https://github.com/piekstra/medical-common), read by
+of [medical-common](https://github.com/own-your-health/medical-common), read by
 `medrec import --from flywire`). It never pays, schedules or cancels a
 payment, sets up a payment plan, stores a card, changes a setting, or
 sends a message.
@@ -37,7 +37,7 @@ read.
 ## Install
 
 ```sh
-cargo install --git https://github.com/piekstra/flywire-cli --locked
+cargo install --git https://github.com/own-your-health/flywire-cli --locked
 # or download a release, flywire-<target>.tar.gz (macOS Apple Silicon or
 # Intel, Linux x86_64), put `flywire` on your PATH; later: flywire self-update
 ```

@@ -18,7 +18,7 @@ use crate::cli::*;
 use crate::portal::{Env, Site};
 use crate::readers::{self, Downloaded};
 
-const REPO: &str = "piekstra/flywire-cli";
+const REPO: &str = "own-your-health/flywire-cli";
 pub const PROFILE_ENV: &str = "FLYWIRE_PROFILE";
 /// The profiles `info` names (cli-info/v1).
 pub const PROFILES: &[&str] = &[pk_med_records::PROFILE, pk_cli_documents::PROFILE];
