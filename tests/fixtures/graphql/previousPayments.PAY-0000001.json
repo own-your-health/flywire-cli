@@ -1,0 +1,26 @@
+{
+  "data": {
+    "previousPayments": [
+      {
+        "amount": 500,
+        "date": "2026-01-05T10:00:00-05:00",
+        "status": "Paid",
+        "paymentMethod": {
+          "paymentType": "credit_card",
+          "paymentSubType": "Visa",
+          "description": "Visa"
+        }
+      },
+      {
+        "amount": 4500,
+        "date": "2026-01-30",
+        "status": "Scheduled",
+        "paymentMethod": {
+          "paymentType": "credit_card",
+          "paymentSubType": "Visa",
+          "description": null
+        }
+      }
+    ]
+  }
+}

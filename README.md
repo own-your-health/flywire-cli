@@ -14,9 +14,11 @@ of [medical-common](https://github.com/piekstra/medical-common), read by
 payment, sets up a payment plan, stores a card, changes a setting, or
 sends a message.
 
-Status: sign-in and `api` work. The bill commands (`accounts`, `bills`,
-`payments`, `records export`, `documents`) come once the signed-in answers
-are mapped (`docs/api.md`).
+Status: sign-in, `api` and the bill commands (`patients`, `accounts`,
+`bills`, `payments`, `documents`, `records export`) work against synthetic
+answers shaped from the portal app's own JavaScript. They have not yet read
+a signed-in portal; `docs/api.md` lists what the first sign-in has to
+confirm.
 
 ## Who it is for
 
@@ -50,8 +52,12 @@ Service keyring such as GNOME Keyring for the stored session.
 flywire profiles add me                       # one profile per patient account
 flywire auth login --browser --provider exampleclinic --profile me
 flywire auth status --profile me
-flywire api POST /graphql --profile me \
-  --data '{"query": "query payableStandingAmount { payableStandingAmount }"}'
+flywire accounts list --profile me
+flywire bills list --open --profile me
+flywire bills show <BILL-ID> --profile me
+flywire documents download --all -o statements --profile me
+flywire patients list --profile me             # the patient id medrec takes
+medrec --profile <FOLDER> import --from flywire --from-profile me --patient <ID>
 ```
 
 Every command that reads the portal takes `--profile <NAME>`
@@ -86,6 +92,14 @@ ended it, a read exits 3 and prints the command that signs in again:
 |---|---|
 | `profiles list\|add\|remove` | `profile-list/v1` |
 | `auth login --browser --provider <P>`, `auth status\|logout\|reset` | `auth-login/v1`, `auth-status/v1`, … |
+| `patients list` | `patient-list/v1`: the patient the sign-in is, with the id `records export --patient` takes |
+| `accounts list` | `account-list/v1`: each account's number, provider, what is owed, bills and open bills |
+| `bills list [--open] [--account <ID>] [--since\|--until <DAY>] [--limit <N>]` | `bill-list/v1`: newest service first, open and closed |
+| `bills show <ID>` | `bill/v1`: the bill's totals (billed, insurance paid and adjusted, patient paid, owed), the plans that covered it and its charges with their CPT or revenue codes |
+| `payments list [--account <ID>] [--since\|--until <DAY>]` | `payment-list/v1`: amount, date, method, status and whether it settled |
+| `documents list` | `document-list/v1`: past statements with a file |
+| `documents download <ID>\|--all -o <DIR>` | `document-download/v1`, `document-download-batch/v1`: the statement's file, owner-only; `-o -` writes it to stdout |
+| `records export (--ndjson\|-o <DIR>) [--patient <ID>] [--org <ORG>] [--since <DAY>]` | `records-stream/v1`: FHIR R4 Invoices with their charges, payments and statements (`docs/fhir.md`); `-o` writes `DIR/records.ndjson`, against a test's server only |
 | `api POST /graphql --data '{"query": "query ..."}'` | the portal's answer, as it came; queries only |
 | `api GET <PATH>` | a path on the portal, as it came |
 | `info` | `cli-info/v1` |

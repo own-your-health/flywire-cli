@@ -86,6 +86,20 @@ fn every_command_renders_help() {
         vec!["config", "--help"],
         vec!["config", "path", "--help"],
         vec!["config", "show", "--help"],
+        vec!["patients", "--help"],
+        vec!["patients", "list", "--help"],
+        vec!["accounts", "--help"],
+        vec!["accounts", "list", "--help"],
+        vec!["bills", "--help"],
+        vec!["bills", "list", "--help"],
+        vec!["bills", "show", "--help"],
+        vec!["payments", "--help"],
+        vec!["payments", "list", "--help"],
+        vec!["records", "--help"],
+        vec!["records", "export", "--help"],
+        vec!["documents", "--help"],
+        vec!["documents", "list", "--help"],
+        vec!["documents", "download", "--help"],
         vec!["api", "--help"],
         vec!["self-update", "--help"],
         vec!["completions", "--help"],
@@ -113,6 +127,10 @@ fn info_declares_the_profile_and_login_profiles() {
     let caps = v["capabilities"].as_array().unwrap();
     assert!(caps.iter().any(|c| c == "login-profiles"), "{caps:?}");
     assert!(!caps.iter().any(|c| c == "records-files"), "no files source: {caps:?}");
+    for c in ["patients", "accounts", "bills", "payments", "records", "documents"] {
+        assert!(caps.iter().any(|x| x == c), "{c}: {caps:?}");
+    }
+    assert_eq!(v["profiles"], serde_json::json!(["health-records/v1", "documents/v1"]));
     assert_eq!(v["auth"]["required"], true);
 }
 
@@ -140,6 +158,14 @@ fn a_login_command_needs_its_profile() {
         vec!["auth", "status"],
         vec!["auth", "logout"],
         vec!["api", "GET", "/app/bills"],
+        vec!["patients", "list"],
+        vec!["accounts", "list"],
+        vec!["bills", "list"],
+        vec!["bills", "show", "BILL-0000001"],
+        vec!["payments", "list"],
+        vec!["documents", "list"],
+        vec!["documents", "download", "STMT-0000001"],
+        vec!["records", "export", "-o", "unused"],
     ] {
         let out = flywire().args(&args).arg("--json").assert().code(2);
         let v = json_of(&out);
@@ -214,11 +240,57 @@ fn a_profile_without_a_session() {
             .contains("auth login --browser --provider <PROVIDER> --profile adult1"),
         "{v}"
     );
+    for args in [
+        vec!["accounts", "list"],
+        vec!["bills", "list", "--open"],
+        vec!["documents", "list"],
+    ] {
+        let out = flywire()
+            .args(&args)
+            .args(["--profile", "adult1"])
+            .arg("--json")
+            .assert()
+            .code(3);
+        assert_eq!(json_of(&out)["error"]["code"], "auth", "{args:?}");
+    }
+    // The stream's own output: nothing on stdout, the error on stderr.
+    flywire()
+        .args(["records", "export", "--ndjson", "--profile", "adult1"])
+        .assert()
+        .code(3)
+        .stdout("");
     let out = flywire()
         .args(["auth", "logout", "--profile", "adult1", "--json"])
         .assert()
         .success();
     assert_eq!(json_of(&out)["session_removed"], false);
+}
+
+/// The readers' own argument checks run before the vault or the site.
+#[test]
+fn the_readers_check_their_arguments_first() {
+    for args in [
+        vec!["records", "export"],
+        vec!["records", "export", "--ndjson", "--json"],
+        vec!["records", "export", "--ndjson", "-o", "x"],
+        vec!["records", "export", "--ndjson", "--since", "2026-13-01"],
+        vec!["bills", "list", "--since", "January"],
+        vec!["bills", "list", "--since", "2026-01-20", "--until", "2026-01-10"],
+        vec!["bills", "show", " "],
+        vec!["payments", "list", "--until", "2026-02-32"],
+        vec!["documents", "download"],
+        vec!["documents", "download", "--all"],
+        vec!["documents", "download", "STMT-0000001", "--all", "-o", "x"],
+        vec!["documents", "download", "--all", "-o", "-"],
+    ] {
+        flywire().args(&args).args(["--profile", "adult1"]).assert().code(2);
+    }
+    // A plain file of records is for a test's server only.
+    flywire()
+        .args(["records", "export", "-o", "x", "--profile", "adult1"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("import --from flywire --from-profile adult1"));
 }
 
 /// `api` reads only, refused before the session is read.

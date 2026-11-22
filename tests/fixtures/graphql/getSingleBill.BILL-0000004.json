@@ -1,0 +1,41 @@
+{
+  "data": {
+    "bill": {
+      "visitNumber": "VISIT-0000004",
+      "accountNumber": "ACCT-0000002",
+      "aTotalBilled": 10000,
+      "insuranceAmount": 0,
+      "aTotalInsuranceAdjustments": 6500,
+      "aPatientPayments": 2000,
+      "aTotalPatientAdjustments": 0,
+      "aPendingInsurance": 1500,
+      "aInsuranceResp": 1500,
+      "planCoverages": [
+        {
+          "payer": "Example Health Plan",
+          "priority": 1,
+          "insuranceName": "Example Health Plan PPO",
+          "insurancePlan": "PPO"
+        },
+        {
+          "payer": "Example Secondary Plan",
+          "priority": 2,
+          "insuranceName": null,
+          "insurancePlan": null
+        }
+      ],
+      "charges": [
+        {
+          "amount": 10000,
+          "date": "2026-01-20",
+          "description": "Office visit, established patient",
+          "cptCode": {
+            "code": "99212",
+            "translation": "Office or outpatient visit"
+          },
+          "revenueCode": null
+        }
+      ]
+    }
+  }
+}

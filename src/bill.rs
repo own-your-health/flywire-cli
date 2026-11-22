@@ -386,6 +386,14 @@ impl Mapper {
                 .collect()
         };
         v.insert("lineItem".into(), lines.into());
+        if !b.lines.is_empty() {
+            // The bill's own amounts where its lines carry less (a site
+            // that itemizes the charges but splits only the bill's total).
+            let parts = price_components(&totals);
+            if !parts.is_empty() {
+                v.insert("totalPriceComponent".into(), parts.into());
+            }
+        }
         if let Some(c) = totals.billed {
             v.insert("totalGross".into(), c.money());
         }
@@ -465,34 +473,7 @@ impl Mapper {
             Some(r) => v["chargeItemReference"] = json!({ "reference": r }),
             None => v["chargeItemCodeableConcept"] = json!({ "text": "Services" }),
         }
-        let mut parts = Vec::new();
-        let mut part = |kind: &str, code: Option<(&str, &str)>, c: Option<Cents>| {
-            if let Some(c) = c {
-                let mut p = json!({ "type": kind, "amount": c.money() });
-                if let Some((code, display)) = code {
-                    p["code"] = json!({ "coding": [{ "system": COMPONENT_SYSTEM, "code": code, "display": display }] });
-                }
-                parts.push(p);
-            }
-        };
-        part("base", Some(("billed", "Billed charge")), a.billed);
-        part("informational", Some(("allowed", "Allowed amount")), a.allowed);
-        part(
-            "deduction",
-            Some(("insurance-payment", "Insurance payment")),
-            a.insurance_paid,
-        );
-        part("discount", Some(("insurance-adjustment", "Adjustment")), a.adjustment);
-        part(
-            "deduction",
-            Some(("patient-payment", "Patient payment")),
-            a.patient_paid,
-        );
-        part(
-            "informational",
-            Some(("patient-responsibility", "Patient owes")),
-            a.patient_owes,
-        );
+        let parts = price_components(a);
         if !parts.is_empty() {
             v["priceComponent"] = parts.into();
         }
@@ -569,6 +550,39 @@ impl Mapper {
         }
         v
     }
+}
+
+/// The `priceComponent`s of `a`, in `COMPONENT_SYSTEM`.
+fn price_components(a: &Amounts) -> Vec<Value> {
+    let mut parts = Vec::new();
+    let mut part = |kind: &str, code: Option<(&str, &str)>, c: Option<Cents>| {
+        if let Some(c) = c {
+            let mut p = json!({ "type": kind, "amount": c.money() });
+            if let Some((code, display)) = code {
+                p["code"] = json!({ "coding": [{ "system": COMPONENT_SYSTEM, "code": code, "display": display }] });
+            }
+            parts.push(p);
+        }
+    };
+    part("base", Some(("billed", "Billed charge")), a.billed);
+    part("informational", Some(("allowed", "Allowed amount")), a.allowed);
+    part(
+        "deduction",
+        Some(("insurance-payment", "Insurance payment")),
+        a.insurance_paid,
+    );
+    part("discount", Some(("insurance-adjustment", "Adjustment")), a.adjustment);
+    part(
+        "deduction",
+        Some(("patient-payment", "Patient payment")),
+        a.patient_paid,
+    );
+    part(
+        "informational",
+        Some(("patient-responsibility", "Patient owes")),
+        a.patient_owes,
+    );
+    parts
 }
 
 fn service_text(b: &Bill) -> String {
@@ -718,6 +732,10 @@ mod tests {
         );
         assert_eq!(v["totalGross"]["value"].to_string(), "250.0");
         assert_eq!(v["totalNet"]["value"].to_string(), "20.0");
+        // The bill's own split rides beside its lines'.
+        let totals = v["totalPriceComponent"].as_array().unwrap();
+        assert_eq!(totals.len(), parts.len());
+        assert_eq!(totals[0]["amount"]["value"].to_string(), "250.0");
         assert_eq!(v["date"], "2020-01-10");
         assert_eq!(v["account"]["reference"], "Account/account-ACCT-1");
         assert_eq!(v["meta"]["lastUpdated"], "2020-02-01T00:00:00Z");
@@ -737,6 +755,7 @@ mod tests {
         assert_eq!(v["status"], "balanced");
         assert!(v.get("contained").is_none());
         assert_eq!(v["lineItem"][0]["chargeItemCodeableConcept"]["text"], "Services");
+        assert!(v.get("totalPriceComponent").is_none(), "its one line carries them");
         assert_eq!(v["note"][0]["text"], "Date of service: 2020-01-02 to 2020-01-04");
         b.voided = true;
         assert_eq!(mapper().bill(&b, "x")["status"], "cancelled");

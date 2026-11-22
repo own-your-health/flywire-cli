@@ -1,0 +1,13 @@
+{
+  "data": {
+    "pastStatementsInfo": [
+      {
+        "id": "STMT-0000003",
+        "createdAt": "2026-01-30",
+        "balanceSnapshot": 0,
+        "statementUniqueId": "SU-0000003",
+        "paperUploadedAt": "2026-01-30T12:00:00Z"
+      }
+    ]
+  }
+}

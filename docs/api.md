@@ -86,6 +86,78 @@ there. flywire never fills or submits the form.
 | `payableStandingAmount` | The amount due across the accounts |
 | `providerDetails(provider)`, `publicSettings(provider)` | The provider's name, phone and portal settings, before sign-in |
 
+## What each command reads (*bundle*)
+
+The documents are the app's own, trimmed to these fields
+(`src/queries.rs`). One request at a time, 750 ms apart.
+
+| Command | Queries | Fields used |
+|---|---|---|
+| `patients list` | `payables(filterClosedBills: false)`, then `payables` again as operation `payableGuarantors` | `payee.companyDisplayName` or `companyName` (the organization's name), then each account's `guarantor.externalId` (hashed with the provider and the profile into the patient id, never printed). Only `patients list` and `records export` send `payableGuarantors`, so a portal that refuses the field fails those two (exit 5) and no other reader |
+| `accounts list` | `payables(filterClosedBills: false)` | `id`, `accountNumber` (else `accountId`), `standingAmount`, `payee`, and each bill's `amountDue` and `aPendingInsurance` |
+| `bills list [--open] [--since] [--until] [--account]` | `payables(filterClosedBills: false)` | each bill's `id`, `displayName`, `admissionDate`, `amountDue`, `aPendingInsurance`, `status`, `claimNo`, `rawVisitType` |
+| `bills show <ID>` | `payables`, then `bill(id)` (`getSingleBill`) | the bill's row, then `visitNumber`, `aTotalBilled`, `insuranceAmount`, `aTotalInsuranceAdjustments`, `aPatientPayments`, `aTotalPatientAdjustments`, `aPendingInsurance`, `aInsuranceResp`, `planCoverages { payer priority insuranceName insurancePlan }`, `charges { amount date description cptCode { code translation } revenueCode { code translation } }` |
+| `payments list` | `payables`, then `previousPayments(payableIds: [<id>])` per account | `amount`, `date`, `status`, `paymentMethod { paymentType paymentSubType description }` |
+| `documents list` | `payables`, then `pastStatementsInfo(payableIds: [<id>], accountNumber)` per account | `id`, `createdAt`, `balanceSnapshot`, `statementUniqueId`, `paperUploadedAt` |
+| `documents download <ID>\|--all -o <DIR>` | as `documents list`, then `pastStatementsContent(id)` per statement | `imageFormat`, `preview` |
+| `records export --ndjson` | all of the above: `payableGuarantors`, `getSingleBill` per bill, then payments, statements and each statement's file | as above |
+
+How the answers are read (`src/reads.rs`):
+
+- Amounts are whole cents: the app's money formatter divides by 100 by
+  default (`convertToCents`). A JSON integer, or a number with no
+  fraction, is cents. A fractional number or a string is exit 5 naming the
+  field (`payables.bills.amountDue`), never with its value.
+- Payments and adjustments are read as amounts taken off, whatever their
+  sign.
+- A date is its first ten characters, when they are a day.
+- A missing or `null` field is absent from the output. An account, bill or
+  statement without its `id` is left out.
+- A numeric CPT or revenue code is padded to 5 or 4 digits.
+- `bills list --open` is a bill with `amountDue` above 0. A bill is voided
+  when its `status` contains `void` or `cancel`.
+- A payment is settled unless its `status` says scheduled, cancelled,
+  voided, failed, bounced, returned, charged back, declined, pending or
+  refunded. `payments list` shows every payment with `settled`; `records
+  export` writes only the settled ones and counts the rest in one skip.
+- `documents list` lists only the statements the app shows: those with
+  both `statementUniqueId` and `paperUploadedAt`.
+
+### The statement file
+
+`pastStatementsContent` answers `imageFormat` and `preview`. The app shows
+the preview as an image or a PDF, but the values of `imageFormat` and the
+encoding of `preview` are not in the JavaScript. flywire reads `preview` as
+a data URL or as base64, and keeps the decoded bytes when they pass the
+check of the format `imageFormat` (or the data URL's media type) names, or
+else their magic bytes show a PDF, PNG, JPEG, TIFF or HEIC. Anything else
+is written as the portal sent it, with a `.bin` name and a warning on
+`documents download`; `records export` skips that statement
+(`verify_failed`) rather than write a Binary it cannot type.
+
+### Not yet observed
+
+Each of these is the reading of the JavaScript alone, to check against the
+first signed-in answers:
+
+- the values of a bill's `status`, so how a voided bill shows;
+- the sign of `insuranceAmount`, the adjustments and `aPatientPayments`;
+- whether `insuranceAmount` is what the insurance paid;
+- whether `claimNo` is the provider's claim number or the insurer's (it is
+  written as the provider's: identifier type `claim`, not `insurer-claim`);
+- the formats of `admissionDate`, a charge's `date`, a payment's `date` and
+  `createdAt`;
+- the raw values of a payment's `status` (the app's labels are Paid,
+  Scheduled and Cancelled);
+- whether amounts ever arrive as fractional numbers or strings;
+- the values of `imageFormat` and the encoding of `preview`;
+- whether a visitor is refused `payableStandingAmount` (the session check);
+- whether a guest sign-in is answered `guarantor.externalId` or refused it
+  (a GraphQL error: exit 5 for `patients list` and `records export`),
+  whether it stays the same across sign-ins, and whether `payables` lists
+  one patient's accounts only (a guarantor responsible for two patients at
+  a provider would put both under one patient id).
+
 ## Read-only
 
 The GraphQL endpoint takes the portal's writes too: payments, payment
