@@ -41,3 +41,12 @@
 - CI's `security` job runs the gitleaks CLI 8.30.1, pinned by checksum, over
   the whole history: gitleaks-action needs a paid license on an
   organization's repository.
+- The export follows medrec's bill mapping (docs/fhir.md): every `Money`
+  value is a JSON number in the bill's decimal spelling (`125.00`, kept
+  by serde_json's `arbitrary_precision`); a bill without lines holds its
+  date of service in a ChargeItem of its own; `totalPriceComponent` is the
+  bill's breakdown, its billed amount the `base` `billed` component, and
+  `totalGross` equals `totalNet`, what the patient owes; a payment's
+  detail names the provider paid (`payee`) and drops `paymentIssuer`,
+  which R4 allows for an Organization only; a statement is typed in
+  `urn:pk-med:doc-type` and its `context.related` names its Account.

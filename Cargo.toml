@@ -32,7 +32,7 @@ pk-med-records = { git = "https://github.com/own-your-health/medical-common", ta
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
 base64 = "0.22"
 
 [target.'cfg(unix)'.dependencies]
