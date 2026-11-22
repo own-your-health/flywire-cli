@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Every request sends the portal app's `source: patient-client` header; without it `/graphql` answers HTTP 400 "no source found", which `auth login` read as not signed in and so never confirmed a real sign-in.
 - `flywire`: a patient's bills from a Flywire patient portal
   (`<provider>.simpleepay.com`), read-only.
 - `profiles list|add|remove`; every command that reads the portal takes

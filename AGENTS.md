@@ -94,7 +94,10 @@ apart, follows no redirect, and maps answers to exit codes: a 401, a
 redirect or the portal's signed-out GraphQL errors are 3 (`auth login
 --browser --provider <PROVIDER> --profile <NAME> --overwrite`); a 403, 429
 and 5xx are 5, and any other GraphQL error is 5 with its count, never its
-text. A `Set-Cookie` updates the jar, written back
+text. So is an HTTP 400 `no source found`: the portal wants the header
+`source: patient-client`, which `Client` and the session check
+(`site::confirm_session`) send on every request (`client::SOURCE`;
+docs/api.md, The session). A `Set-Cookie` updates the jar, written back
 once the command has read what it needed, unless a newer sign-in replaced
 the stored session meanwhile (`portal::Site::finish`). A failed write-back
 is a warning.

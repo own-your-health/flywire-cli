@@ -61,6 +61,11 @@ there. flywire never fills or submits the form.
 - The session is the `HttpOnly` cookie `_simplee_store2` on the provider's
   host. The site sets cookies before anyone signs in, so a cookie alone
   does not show a session.
+- Every request the app sends carries the header `source: patient-client`
+  (observed 2026-11-22). `/graphql` answers a request without it HTTP 400
+  with the body `{"errors": "no source found"}`, signed in or not. flywire
+  sends it on every request, and reads that answer as the app's requests
+  having changed (exit 5), not as a sign-in that ended.
 - `auth login` keeps the host's whole cookie jar and confirms it with one
   read: `query payableStandingAmount { payableStandingAmount }`, the
   account's amount due, which needs a signed-in patient (*bundle*: which
@@ -135,6 +140,17 @@ is written as the portal sent it, with a `.bin` name and a warning on
 `documents download`; `records export` skips that statement
 (`verify_failed`) rather than write a Binary it cannot type.
 
+### Open problem: `payables` after the sign-in (2026-11-22)
+
+With a session `auth login` captured, `payableStandingAmount` answers, but
+`payables` answers HTTP 200 with `data.payables` null and one error,
+`failed to get payables`. That holds for the app's own document, its
+headers (`source`, `requestId`, `X-Request-ID`, `Origin`, `Referer`) and
+`filterClosedBills` true, false or absent. The app's own `payables`,
+sent right after its `login`, answered without errors. Every reader
+starts with `payables`, so they all fail with exit 5 until this is
+understood.
+
 ### Not yet observed
 
 Each of these is the reading of the JavaScript alone, to check against the
@@ -197,6 +213,10 @@ time, 750 ms apart, and never pays, changes a setting or sends a message.
 Whoever runs it decides whether that is a use the terms allow.
 
 ## Traps
+
+- A `/graphql` request without `source: patient-client` is answered HTTP 400
+  `"no source found"`, which looks like a signed-out session; it is the
+  missing header.
 
 - The "Verify Email Address" email links to
   `/providers/<provider id>/subscriptions/go_paperless?activation_token=...`:

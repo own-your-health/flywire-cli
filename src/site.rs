@@ -159,6 +159,7 @@ pub fn confirm_session(origin: &str, cookie_header: &str, user_agent: Option<&st
     let answer = match client
         .post(&url)
         .header(COOKIE, cookie)
+        .header(crate::client::SOURCE.0, crate::client::SOURCE.1)
         .header(ACCEPT, "application/json")
         .header(CONTENT_TYPE, "application/json")
         .body(body.to_string())
@@ -204,6 +205,9 @@ pub fn confirm_session(origin: &str, cookie_header: &str, user_agent: Option<&st
 /// [`confirm_session`] has not already decided.
 pub fn judge(status: u16, content_type: Option<&str>, body: &[u8]) -> Confirm {
     let what = "POST /graphql (payableStandingAmount)";
+    if status == 400 && is_sourceless(body) {
+        return Confirm::Fail(sourceless(what));
+    }
     if (400..500).contains(&status) {
         return Confirm::NotYet(format!("{what} answered HTTP {status}: not signed in"));
     }
@@ -226,6 +230,25 @@ pub fn judge(status: u16, content_type: Option<&str>, body: &[u8]) -> Confirm {
         Some(v) if !v.is_null() && !has_errors => Confirm::Ready,
         _ => Confirm::undecided(format!("{what} answered without the account's amount")),
     }
+}
+
+/// Whether `body` is the portal's answer to a request without the app's
+/// [`crate::client::SOURCE`] header: `{"errors":"no source found"}`.
+pub fn is_sourceless(body: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(body)
+        .ok()
+        .is_some_and(|d| d.get("errors").and_then(Value::as_str) == Some("no source found"))
+}
+
+/// The error for an answer [`is_sourceless`]: exit 5, naming the header.
+/// A flywire build that does not send [`crate::client::SOURCE`] is the
+/// cause, or a portal that has started asking for another value.
+pub fn sourceless(what: &str) -> CliError {
+    let (name, value) = crate::client::SOURCE;
+    CliError::Upstream(format!(
+        "{what} answered HTTP 400 \"no source found\": the portal wants the request header \
+         \"{name}: {value}\", and it did not accept this request's (docs/api.md, The session)"
+    ))
 }
 
 /// The confirm read's client: no redirects followed, bounded in time.
@@ -318,6 +341,10 @@ mod tests {
             Confirm::NotYet(_)
         ));
         assert!(matches!(judge(401, json, b"{}"), Confirm::NotYet(r) if r.contains("HTTP 401")));
+        assert!(matches!(
+            judge(400, json, br#"{"errors":"no source found"}"#),
+            Confirm::Fail(e) if e.to_string().contains("no source found")
+        ));
         for (status, mime, body) in [
             (200, json, &br#"{"data":{"payableStandingAmount":null}}"#[..]),
             (200, json, &br#"{"data":{}}"#[..]),

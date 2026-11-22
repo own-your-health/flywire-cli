@@ -45,6 +45,11 @@ const MAX_BODY: u64 = 32 * 1024 * 1024;
 /// The portal's GraphQL endpoint.
 pub const GRAPHQL: &str = "/graphql";
 
+/// The header the portal's app sends on every request (`source:
+/// patient-client`, observed 2026-11-22). Without it `/graphql` answers
+/// HTTP 400 with the body `{"errors": "no source found"}`, signed in or not.
+pub const SOURCE: (&str, &str) = ("source", "patient-client");
+
 /// A test's loopback origin from [`BASE_URL_ENV`], or `None` for the real
 /// portals.
 pub fn base_override() -> Result<Option<String>, CliError> {
@@ -198,6 +203,7 @@ impl Client {
             HeaderValue::from_str(&agent)
                 .map_err(|_| CliError::Other("the stored user agent is not a valid HTTP header value".into()))?,
         );
+        headers.insert(SOURCE.0, HeaderValue::from_static(SOURCE.1));
         // A plain client: no cookie store (the jar is ours), no redirects.
         let http = reqwest::blocking::Client::builder()
             .default_headers(headers)
@@ -559,6 +565,7 @@ pub fn refuse(a: &Answer, profile: &ProfileName, provider: &Provider) -> Result<
     let html = a.content_type.as_deref().is_some_and(|t| t.contains("html"));
     match status {
         200..=299 => Ok(()),
+        400 if crate::site::is_sourceless(&a.body) => Err(crate::site::sourceless(what)),
         401 => Err(refused_session(what, "HTTP 401", profile, provider)),
         300..=399 => Err(refused_session(
             what,
@@ -640,6 +647,25 @@ mod tests {
         ] {
             assert_eq!(base_from(Some(bad), true).unwrap_err().exit_code(), 2, "{bad}");
         }
+    }
+
+    #[test]
+    fn a_sourceless_400_is_exit_5_naming_the_header() {
+        let e = refuse(
+            &answer(400, "application/json", r#"{"errors":"no source found"}"#),
+            &adult1(),
+            &example(),
+        )
+        .unwrap_err();
+        assert_eq!(e.exit_code(), 5);
+        assert!(e.to_string().contains("\"source: patient-client\""), "{e}");
+        // Another 400 is not read as a missing header.
+        let other = refuse(
+            &answer(400, "application/json", r#"{"errors":[{"message":"bad"}]}"#),
+            &adult1(),
+            &example(),
+        );
+        assert!(!other.is_err_and(|e| e.to_string().contains("no source found")));
     }
 
     fn answer(status: u16, content_type: &str, body: &str) -> Answer {
