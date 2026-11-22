@@ -25,7 +25,7 @@ from [medical-common](https://github.com/own-your-health/medical-common). Every
 | `src/site.rs` | the provider (`Provider`: one label on simpleepay.com), the sign-in: the browser capture and the session check (`SESSION_CHECK`, `judge`) |
 | `src/client.rs` | the reads: `query` (one GraphQL query's `data`), pacing, the cookie jar, `refuse` (answers to exit codes), and `api_request`, which checks an `api` request is a read before it is sent |
 | `src/graphql.rs` | `read_only_graphql` (queries and fragments only), `refused_field` (queries that do more than read), `is_signed_out` (the portal's signed-out errors) |
-| `src/bill.rs` | the bill model (accounts, bills and their charge lines, payments, statements) and its FHIR mapping (`docs/fhir.md`) |
+| `src/bill.rs` | the bill model (accounts, bills and their charge lines, payments, statements, receipts) and its FHIR mapping (`docs/fhir.md`). The same file is in flywire-cli, peryourhealth-cli and embryooptions-cli, differing only in the CLI's name in two doc comments: a change to it is made in all three. It needs serde_json's `arbitrary_precision` (Cargo.toml) to keep money's decimal spelling; its unit test fails without it |
 | `src/portal.rs` | the signed-in session (`Env`: where sessions are kept and which site is read; `Site`: each reader query, and the write-back of refreshed cookies) |
 | `src/queries.rs` | the GraphQL documents the readers send, the app's own trimmed to the fields read |
 | `src/reads.rs` | the portal's answers parsed (amounts in cents, days, codes, the statement file) and turned into the bill model |
