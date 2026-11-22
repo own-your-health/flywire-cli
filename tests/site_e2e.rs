@@ -848,16 +848,25 @@ fn the_export_is_bills_payments_and_statements_as_fhir() {
     assert_eq!(office["lineItem"][1]["chargeItemReference"]["reference"], "#charge-2");
     assert_eq!(
         component(&office["lineItem"][0]["priceComponent"], "billed").as_deref(),
-        Some("200.0")
+        Some("200.00")
     );
+    // Money keeps its two places through the stream: a JSON number.
+    assert!(office["lineItem"][0]["priceComponent"][0]["amount"]["value"].is_number());
     let totals = &office["totalPriceComponent"];
-    assert_eq!(component(totals, "billed").as_deref(), Some("250.0"));
-    assert_eq!(component(totals, "insurance-payment").as_deref(), Some("150.0"));
-    assert_eq!(component(totals, "insurance-adjustment").as_deref(), Some("50.0"));
-    assert_eq!(component(totals, "patient-payment").as_deref(), Some("5.0"));
-    assert_eq!(component(totals, "patient-responsibility").as_deref(), Some("45.0"));
-    assert_eq!(office["totalGross"]["value"].to_string(), "250.0");
-    assert_eq!(office["totalNet"]["value"].to_string(), "45.0");
+    assert_eq!(component(totals, "billed").as_deref(), Some("250.00"));
+    assert_eq!(component(totals, "insurance-payment").as_deref(), Some("150.00"));
+    assert_eq!(component(totals, "insurance-adjustment").as_deref(), Some("50.00"));
+    assert_eq!(component(totals, "patient-payment").as_deref(), Some("5.00"));
+    assert_eq!(component(totals, "patient-responsibility").as_deref(), Some("45.00"));
+    assert_eq!(office["totalNet"]["value"].to_string(), "45.00");
+    assert_eq!(office["totalGross"], office["totalNet"], "no tax on a medical bill");
+    assert_eq!(
+        office["issuer"]["reference"]
+            .as_str()
+            .map(|r| r.starts_with("Organization/")),
+        Some(true)
+    );
+    assert!(office["issuer"]["display"].is_string());
     let idents: Vec<&str> = office["identifier"]
         .as_array()
         .unwrap()
@@ -875,12 +884,19 @@ fn the_export_is_bills_payments_and_statements_as_fhir() {
     assert_eq!(lab["contained"][0]["code"]["coding"][0]["code"], "0300");
     let voided = by_id("bill-ACCT-0000001-BILL-0000003");
     assert_eq!(voided["status"], "cancelled");
-    assert_eq!(voided["lineItem"][0]["chargeItemCodeableConcept"]["text"], "Services");
+    assert_eq!(voided["lineItem"][0]["chargeItemReference"]["reference"], "#charge-1");
+    assert_eq!(
+        voided["contained"][0]["occurrenceDateTime"], "2026-01-15",
+        "a bill without lines holds its date of service in its one ChargeItem"
+    );
     assert_eq!(
         component(&voided["lineItem"][0]["priceComponent"], "billed").as_deref(),
-        Some("120.0")
+        Some("120.00")
     );
-    assert_eq!(voided["note"][0]["text"], "Date of service: 2026-01-15");
+    assert_eq!(
+        component(&voided["totalPriceComponent"], "billed").as_deref(),
+        Some("120.00")
+    );
 
     let payments: Vec<&Value> = resources
         .iter()
@@ -898,14 +914,26 @@ fn the_export_is_bills_payments_and_statements_as_fhir() {
     assert_eq!(
         paid,
         [
-            ("2026-01-05".into(), "5.0".into()),
-            ("2026-01-20".into(), "20.0".into())
+            ("2026-01-05".into(), "5.00".into()),
+            ("2026-01-20".into(), "20.00".into())
         ]
     );
     assert_eq!(payments[0]["disposition"], "Paid by Visa");
+    // The portal says which provider a payment paid, not which bills.
+    assert_eq!(
+        payments[0]["detail"][0]["payee"]["display"],
+        office["issuer"]["display"]
+    );
+    assert!(payments[0]["detail"][0].get("request").is_none());
 
     let doc = by_id("statement-ACCT-0000001-STMT-0000001");
     assert_eq!(doc["date"], "2026-01-25T00:00:00Z");
+    assert_eq!(doc["type"]["coding"][0]["system"], "urn:pk-med:doc-type");
+    assert_eq!(doc["type"]["coding"][0]["code"], "bill");
+    assert_eq!(
+        doc["context"]["related"][0]["reference"],
+        "Account/account-ACCT-0000001"
+    );
     assert_eq!(doc["content"][0]["attachment"]["contentType"], "application/pdf");
     let binary_ref = doc["content"][0]["attachment"]["url"].as_str().unwrap();
     let binary_at = resources
