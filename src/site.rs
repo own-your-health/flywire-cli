@@ -206,10 +206,7 @@ pub fn confirm_session(origin: &str, cookie_header: &str, user_agent: Option<&st
 pub fn judge(status: u16, content_type: Option<&str>, body: &[u8]) -> Confirm {
     let what = "POST /graphql (payableStandingAmount)";
     if status == 400 && is_sourceless(body) {
-        return Confirm::Fail(CliError::Upstream(format!(
-            "{what} answered HTTP 400 \"no source found\": the portal wants a request header flywire does not send; \
-             the app's requests have changed (docs/api.md, The session)"
-        )));
+        return Confirm::Fail(sourceless(what));
     }
     if (400..500).contains(&status) {
         return Confirm::NotYet(format!("{what} answered HTTP {status}: not signed in"));
@@ -241,6 +238,17 @@ pub fn is_sourceless(body: &[u8]) -> bool {
     serde_json::from_slice::<Value>(body)
         .ok()
         .is_some_and(|d| d.get("errors").and_then(Value::as_str) == Some("no source found"))
+}
+
+/// The error for an answer [`is_sourceless`]: exit 5, naming the header.
+/// A flywire build that does not send [`crate::client::SOURCE`] is the
+/// cause, or a portal that has started asking for another value.
+pub fn sourceless(what: &str) -> CliError {
+    let (name, value) = crate::client::SOURCE;
+    CliError::Upstream(format!(
+        "{what} answered HTTP 400 \"no source found\": the portal wants the request header \
+         \"{name}: {value}\", and it did not accept this request's (docs/api.md, The session)"
+    ))
 }
 
 /// The confirm read's client: no redirects followed, bounded in time.

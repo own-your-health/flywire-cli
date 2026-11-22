@@ -565,10 +565,7 @@ pub fn refuse(a: &Answer, profile: &ProfileName, provider: &Provider) -> Result<
     let html = a.content_type.as_deref().is_some_and(|t| t.contains("html"));
     match status {
         200..=299 => Ok(()),
-        400 if crate::site::is_sourceless(&a.body) => Err(CliError::Upstream(format!(
-            "{what} answered HTTP 400 \"no source found\": the portal wants a request header flywire does not \
-             send; the app's requests have changed (docs/api.md, The session)"
-        ))),
+        400 if crate::site::is_sourceless(&a.body) => Err(crate::site::sourceless(what)),
         401 => Err(refused_session(what, "HTTP 401", profile, provider)),
         300..=399 => Err(refused_session(
             what,
@@ -650,6 +647,25 @@ mod tests {
         ] {
             assert_eq!(base_from(Some(bad), true).unwrap_err().exit_code(), 2, "{bad}");
         }
+    }
+
+    #[test]
+    fn a_sourceless_400_is_exit_5_naming_the_header() {
+        let e = refuse(
+            &answer(400, "application/json", r#"{"errors":"no source found"}"#),
+            &adult1(),
+            &example(),
+        )
+        .unwrap_err();
+        assert_eq!(e.exit_code(), 5);
+        assert!(e.to_string().contains("\"source: patient-client\""), "{e}");
+        // Another 400 is not read as a missing header.
+        let other = refuse(
+            &answer(400, "application/json", r#"{"errors":[{"message":"bad"}]}"#),
+            &adult1(),
+            &example(),
+        );
+        assert!(!other.is_err_and(|e| e.to_string().contains("no source found")));
     }
 
     fn answer(status: u16, content_type: &str, body: &str) -> Answer {

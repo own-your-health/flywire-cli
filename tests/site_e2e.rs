@@ -1178,3 +1178,30 @@ fn a_reader_without_its_profile_is_exit_2() {
     }
     assert!(server.seen.lock().unwrap().is_empty(), "no request without a profile");
 }
+
+#[test]
+fn a_request_without_the_source_header_is_refused_as_the_portal_does() {
+    let server = serve(routes(), None);
+    let answer = reqwest::blocking::Client::new()
+        .post(format!("{}/graphql", server.base))
+        .header("content-type", "application/json")
+        .body(r#"{"operationName":"payableStandingAmount","query":"query payableStandingAmount { payableStandingAmount }","variables":{}}"#)
+        .send()
+        .unwrap();
+    let status = answer.status().as_u16();
+    let content_type = answer
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let body = answer.bytes().unwrap();
+    assert_eq!(status, 400);
+    match flywire::site::judge(status, content_type.as_deref(), &body) {
+        pk_cli_browser::Confirm::Fail(e) => {
+            assert_eq!(e.exit_code(), 5);
+            assert!(e.to_string().contains("\"source: patient-client\""), "{e}");
+        }
+        other => panic!("a sourceless answer must fail the check, not {other:?}"),
+    }
+    assert_eq!(server.seen.lock().unwrap()[0].source, None);
+}
