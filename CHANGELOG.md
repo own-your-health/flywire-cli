@@ -34,3 +34,10 @@
   `documents/v1` profiles.
 - `make dogfood` drives the installed binary through every command and
   error path against a loopback server serving the synthetic fixtures.
+- The repository moved to own-your-health
+  (github.com/own-your-health/flywire-cli); `self-update`, `cargo install
+  --git` and the medical-common dependency (still v0.6.9) follow it.
+- `url` 2.5.9, for RUSTSEC-2026-0592 (a stack overflow in `Url::origin()`).
+- CI's `security` job runs the gitleaks CLI 8.30.1, pinned by checksum, over
+  the whole history: gitleaks-action needs a paid license on an
+  organization's repository.
