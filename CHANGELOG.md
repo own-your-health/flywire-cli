@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- medical-common v0.6.11 and cli-common v0.33.5: the bill's code systems,
+  price components, document types, `Money` and totals come from
+  `pk_med_records::bill` (DESIGN §1.10) instead of the CLI's own copy. Two
+  displays change to the profile's: `insurance-adjustment` is "Insurance
+  adjustment" (was "Adjustment") and `patient-responsibility` is "Patient
+  responsibility" (was "Patient owes"). Codes, types, amounts and ids
+  are unchanged.
 - Every request sends the portal app's `source: patient-client` header; without it `/graphql` answers HTTP 400 "no source found", which `auth login` read as not signed in and so never confirmed a real sign-in.
 - `flywire`: a patient's bills from a Flywire patient portal
   (`<provider>.simpleepay.com`), read-only.
@@ -37,7 +44,7 @@
   error path against a loopback server serving the synthetic fixtures.
 - The repository moved to own-your-health
   (github.com/own-your-health/flywire-cli); `self-update`, `cargo install
-  --git` and the medical-common dependency (still v0.6.9) follow it.
+  --git` and the medical-common dependency follow it.
 - `url` 2.5.9, for RUSTSEC-2026-0592 (a stack overflow in `Url::origin()`).
 - CI's `security` job runs the gitleaks CLI 8.30.1, pinned by checksum, over
   the whole history: gitleaks-action needs a paid license on an
