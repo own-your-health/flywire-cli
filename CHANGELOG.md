@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- An answer without the accounts' list (`payables` null, and no GraphQL
+  error) is exit 5 instead of a sign-in with no accounts, so `records
+  export` never writes a complete stream of nothing. A bill answered
+  without the bill is exit 5 for `bills show` and a skip in the export,
+  instead of a bill with every total missing.
+- `scripts/fixture-server.py` answers a request without the `source:
+  patient-client` header with HTTP 400 "no source found", as the portal
+  does, and `make dogfood` covers the two empty answers.
 - medical-common v0.6.11 and cli-common v0.33.5: the bill's code systems,
   price components, document types, `Money` and totals come from
   `pk_med_records::bill` (DESIGN §1.10) instead of the CLI's own copy. Two

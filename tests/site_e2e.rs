@@ -1092,6 +1092,56 @@ fn a_graphql_error_on_one_bill_is_exit_5_and_a_skip_in_the_export() {
 }
 
 #[test]
+fn a_bill_answered_without_the_bill_is_exit_5_and_a_skip_in_the_export() {
+    let mut routes = fixture_routes();
+    routes.insert(
+        "POST graphql getSingleBill BILL-0000001".into(),
+        (200, JSON, r#"{"data":{"bill":null}}"#.into()),
+    );
+    let server = serve(routes, None);
+    let env = env(&server, "bill-null");
+    let site = Site::open(&env, &adult1()).unwrap();
+    let e = readers::bill_show(&site, "BILL-0000001", None).err().unwrap();
+    assert_eq!(e.exit_code(), 5, "{e}");
+    let mut out = Vec::new();
+    let finished = readers::export(&site, &server.base, &mut out, None, None, None).unwrap();
+    assert!(finished.trailer.complete);
+    let (_, resources, trailer) = read_stream(&out);
+    assert_eq!(trailer.counts.get("Invoice"), Some(&3));
+    assert!(!resources.iter().any(|r| r["id"] == "bill-ACCT-0000001-BILL-0000001"));
+    let skip = &trailer.skipped[0];
+    assert_eq!(
+        (skip.code.as_str(), skip.id.as_deref()),
+        ("upstream", Some("bill-ACCT-0000001-BILL-0000001"))
+    );
+}
+
+#[test]
+fn accounts_answered_without_the_list_end_the_export_before_its_header() {
+    let mut routes = fixture_routes();
+    routes.insert(
+        "POST graphql payables".into(),
+        (200, JSON, r#"{"data":{"payables":null}}"#.into()),
+    );
+    let server = serve(routes, None);
+    let env = env(&server, "payables-null");
+    let site = Site::open(&env, &adult1()).unwrap();
+    assert_eq!(
+        readers::bills_list(&site, None, false, &RangeArgs::default())
+            .err()
+            .unwrap()
+            .exit_code(),
+        5
+    );
+    let mut out = Vec::new();
+    let e = readers::export(&site, &server.base, &mut out, None, None, None)
+        .err()
+        .unwrap();
+    assert_eq!(e.exit_code(), 5, "{e}");
+    assert!(out.is_empty(), "no stream claims a sign-in with no accounts");
+}
+
+#[test]
 fn a_session_that_ends_mid_export_ends_it_incomplete() {
     let mut routes = fixture_routes();
     routes.insert(

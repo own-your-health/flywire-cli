@@ -9,8 +9,9 @@ January 2026).
 `graphql/` holds the answers to the readers' GraphQL queries, one file per
 operation: `<operationName>.json`, or `<operationName>.<id>.json` for the
 answer to one id (`id`, `statementId` or the first of `payableIds` in the
-variables). `signedOut.json` and `error.json` are the error answers the
-tests and `make dogfood` put in place of a fixture.
+variables). `signedOut.json`, `error.json` and `noAnswer.json` (the list or
+the bill `null`, with no error) are the error answers the tests and `make
+dogfood` put in place of a fixture.
 
 Where the JavaScript does not say what a value looks like (a bill's
 `status`, a payment's `status`, `imageFormat`), the fixtures use a

@@ -15,11 +15,13 @@ on synthetic data:
 `POST /graphql` is answered by its `operationName`: first
 `<operationName>.<id>.json`, the id its variables name (`id`, `statementId`
 or the first of `payableIds`), then `<operationName>.json`. A request
-without the `_simplee_store2=dummy1` cookie gets `signedOut.json`.
+without the `_simplee_store2=dummy1` cookie gets `signedOut.json`, and one
+without the app's `source: patient-client` header HTTP 400 `{"errors": "no
+source found"}`, as the portal answers it.
 
 For the error paths, `--answer KEY=FILE` answers KEY (`<operationName>` or
 `<operationName>.<id>`) with another fixture (`signedOut.json`,
-`error.json`) ahead of its own, and `--status KEY=CODE` with that HTTP
+`error.json`, `noAnswer.json`) ahead of its own, and `--status KEY=CODE` with that HTTP
 status and an empty JSON body. `GET /` answers 200, so a script can wait for the server.
 
 `scripts/dogfood.sh` (`make dogfood`) runs every command and error path this
@@ -80,6 +82,8 @@ def main():
             raw = self.rfile.read(length)
             if self.path != "/graphql":
                 return self.answer(404, b"<p>not found</p>", "text/html")
+            if self.headers.get("source") != "patient-client":
+                return self.answer(400, b'{"errors":"no source found"}')
             try:
                 doc = json.loads(raw)
             except ValueError:

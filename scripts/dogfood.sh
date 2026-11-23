@@ -10,7 +10,7 @@
 # data"): a vault key under the keychain service piekstra.flywire.dogfood,
 # created by the binary under test, so no keychain dialog, and removed at
 # the end with `auth reset --force`. It never reads the owner's sessions.
-# Ports DOGFOOD_PORT (default 8951) to DOGFOOD_PORT+4 must be free.
+# Ports DOGFOOD_PORT (default 8951) to DOGFOOD_PORT+6 must be free.
 set -u
 
 FW=${1:-$(command -v flywire || true)}
@@ -26,6 +26,8 @@ Q=$((P + 1))             # signed out on payables, a GraphQL error on one bill
 R=$((P + 2))             # HTTP 500 on payables
 G=$((P + 3))             # the guarantor query refused
 H=$((P + 4))             # HTTP 503 on the guarantor query
+N=$((P + 5))             # payables answered without the list
+B=$((P + 6))             # one bill answered without the bill
 DOWN=$((P + 8))          # nothing listens
 SERVER=(python3 -I "$HERE/fixture-server.py")
 "${SERVER[@]}" "$P" 2>"$T/server-$P.log" & S1=$!
@@ -34,17 +36,19 @@ SERVER=(python3 -I "$HERE/fixture-server.py")
 "${SERVER[@]}" "$R" --status payables=500 2>"$T/server-$R.log" & S3=$!
 "${SERVER[@]}" "$G" --answer payableGuarantors=error.json 2>"$T/server-$G.log" & S4=$!
 "${SERVER[@]}" "$H" --status payableGuarantors=503 2>"$T/server-$H.log" & S5=$!
+"${SERVER[@]}" "$N" --answer payables=noAnswer.json 2>"$T/server-$N.log" & S6=$!
+"${SERVER[@]}" "$B" --answer getSingleBill.BILL-0000001=noAnswer.json 2>"$T/server-$B.log" & S7=$!
 
 cleanup() {
     exec 2>/dev/null  # no job notice for the servers killed
     "$FW" auth reset --force >/dev/null
-    kill "$S1" "$S2" "$S3" "$S4" "$S5" 2>/dev/null
+    kill "$S1" "$S2" "$S3" "$S4" "$S5" "$S6" "$S7" 2>/dev/null
     wait 2>/dev/null
     rm -rf "$T"
 }
 trap cleanup EXIT
 
-for port in "$P" "$Q" "$R" "$G" "$H"; do
+for port in "$P" "$Q" "$R" "$G" "$H" "$N" "$B"; do
     up=
     for _ in $(seq 50); do
         curl -s -o /dev/null "http://127.0.0.1:$port/" && { up=1; break; }
@@ -178,6 +182,11 @@ check "guarantor refused: nothing on stdout" "0" "$(wc -c <"$T/out" | tr -d ' ')
 value "guarantor refused: bills list still reads" "4" "len(d['items'])" at "$G" "$FW" bills list "${S[@]}" --json
 code "guarantor query HTTP 503" 5 at "$H" "$FW" patients list "${S[@]}"
 check "guarantor query HTTP 503: names the status" "1" "$(grep -c 'HTTP 503' "$T/err")"
+code "accounts answered without the list" 5 at "$N" "$FW" accounts list "${S[@]}"
+code "accounts without the list: export" 5 at "$N" "$FW" records export "${S[@]}" --ndjson
+check "accounts without the list: nothing on stdout" "0" "$(wc -c <"$T/out" | tr -d ' ')"
+code "a bill answered without the bill" 5 at "$B" "$FW" bills show BILL-0000001 "${S[@]}"
+value "a bill without the bill: export skips it" "True 3 True" "d['complete'], d['counts']['Invoice'], 'upstream' in [s['code'] for s in d['skipped']]" at "$B" "$FW" records export "${S[@]}" --ndjson
 code "server down" 5 at "$DOWN" "$FW" accounts list "${S[@]}"
 code "a base that is not loopback" 2 env FLYWIRE_BASE_URL=http://example.com "$FW" accounts list "${S[@]}"
 code "config path" 0 "$FW" config path
