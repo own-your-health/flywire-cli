@@ -116,6 +116,9 @@ How the answers are read (`src/reads.rs`):
 - Payments and adjustments are read as amounts taken off, whatever their
   sign.
 - A date is its first ten characters, when they are a day.
+- `payables` answered without its list, or `getSingleBill` without its
+  bill (`null` or absent, with no GraphQL error), is exit 5: the accounts
+  are never read as none, and the export skips such a bill.
 - A missing or `null` field is absent from the output. An account, bill or
   statement without its `id` is left out.
 - A numeric CPT or revenue code is padded to 5 or 4 digits.

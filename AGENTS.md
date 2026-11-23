@@ -139,12 +139,14 @@ under its test keychain service: `auth reset --force` under the same
 variables removes it.
 
 `make dogfood` (`scripts/dogfood.sh [BINARY]`, the installed `flywire` by
-default) does all of it: it starts five fixture servers (the fixtures; one
+default) does all of it: it starts seven fixture servers (the fixtures; one
 signed out on payments and with a GraphQL error on one bill; one answering
-HTTP 500; one refusing the guarantor query; one failing it with HTTP 503),
+HTTP 500; one refusing the guarantor query; one failing it with HTTP 503;
+one answering payables without the list; one answering one bill without
+the bill),
 drives every command and error path, checks exit codes and
 values, prints one row per case and exits 1 if any failed. Its vault key,
 under `piekstra.flywire.dogfood`, is created by the binary under test, so
 it raises no keychain dialog, and is removed when it ends. It is not part
 of `make verify`: it needs a keychain (or Secret Service) and free local
-ports (8951 to 8955, `DOGFOOD_PORT` moves them).
+ports (8951 to 8957, `DOGFOOD_PORT` moves them).

@@ -267,11 +267,17 @@ fn code(v: &Value, key: &str, width: usize) -> Option<(String, Option<String>)> 
 
 // ------------------------------------------------------------ answers
 
-/// `payables`' `data`: the accounts, with their bills, newest first.
+/// `payables`' `data`: the accounts, with their bills, newest first. An
+/// answer without the list (`payables` or `payables.payables` absent or
+/// `null`, with no GraphQL error) is exit 5, not a sign-in with no
+/// accounts: read as empty, it would make `records export` a complete
+/// stream of nothing.
 pub fn payables(data: &Value) -> Result<Vec<PortalAccount>, CliError> {
-    let list = data.pointer("/payables/payables").unwrap_or(&Value::Null);
+    let Some(list) = data.pointer("/payables/payables").and_then(Value::as_array) else {
+        return Err(no_answer("payables.payables", "the accounts"));
+    };
     let mut accounts = Vec::new();
-    for p in list.as_array().map(Vec::as_slice).unwrap_or(&[]) {
+    for p in list {
         let Some(id) = text(p, "id") else { continue };
         let number = text(p, "accountNumber")
             .or_else(|| text(p, "accountId"))
@@ -305,6 +311,14 @@ pub fn payables(data: &Value) -> Result<Vec<PortalAccount>, CliError> {
     Ok(accounts)
 }
 
+/// The error for an answer that lacks what the query asked for, naming
+/// the field.
+fn no_answer(field: &str, what: &str) -> CliError {
+    CliError::Upstream(format!(
+        "the portal answered without {what} (`{field}` is missing or null) and named no error"
+    ))
+}
+
 /// `payableGuarantors`' `data`: each account's guarantor id
 /// (`guarantor.externalId`), personal data used only hashed into the
 /// patient id. Accounts naming none are left out.
@@ -317,9 +331,14 @@ pub fn guarantors(data: &Value) -> Vec<String> {
         .collect()
 }
 
-/// `getSingleBill`'s `data`.
+/// `getSingleBill`'s `data`. An answer without the bill (`bill` absent or
+/// `null`, with no GraphQL error) is exit 5, so `bills show` does not show
+/// a bill with every total missing and `records export` skips it rather
+/// than write an Invoice without its charges.
 pub fn bill_detail(data: &Value) -> Result<BillDetail, CliError> {
-    let b = data.get("bill").unwrap_or(&Value::Null);
+    let Some(b) = data.get("bill").filter(|b| b.is_object()) else {
+        return Err(no_answer("bill", "the bill"));
+    };
     let at = "bill";
     let mut coverages: Vec<Coverage> = array(b, "planCoverages")
         .iter()
@@ -614,6 +633,26 @@ mod tests {
             assert!(e.to_string().contains(&format!("payables.bills.{bad}")), "{e}");
             assert!(!e.to_string().contains("12.5"), "{e}");
         }
+    }
+
+    #[test]
+    fn an_answer_without_its_list_or_bill_is_exit_5() {
+        for data in [
+            json!({}),
+            json!({"payables": null}),
+            json!({"payables": {"payables": null}}),
+        ] {
+            let e = payables(&data).err().unwrap();
+            assert_eq!(e.exit_code(), 5, "{data}");
+            assert!(e.to_string().contains("payables.payables"), "{e}");
+        }
+        assert_eq!(payables(&json!({"payables": {"payables": []}})).unwrap(), vec![]);
+        for data in [json!({}), json!({"bill": null}), json!({"bill": []})] {
+            let e = bill_detail(&data).err().unwrap();
+            assert_eq!(e.exit_code(), 5, "{data}");
+            assert!(e.to_string().contains("`bill`"), "{e}");
+        }
+        assert!(bill_detail(&json!({"bill": {}})).is_ok());
     }
 
     #[test]
