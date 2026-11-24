@@ -17,7 +17,9 @@ Report a vulnerability privately through GitHub's "Report a vulnerability"
   `[::1]`, `FLYWIRE_KEYCHAIN_SERVICE` names a test service
   (`piekstra.flywire.<suffix>`) and `XDG_CONFIG_HOME` is set away from
   `~/.config`, so a session the owner stored is never sent anywhere but its
-  portal. `flywire api` is held to the same: a GraphQL document of queries
+  portal. While `FLYWIRE_KEYCHAIN_SERVICE` is set, `FLYWIRE_BASE_URL` is
+  required: without a loopback base, every command that would send a request
+  exits 2 before sending anything. `flywire api` is held to the same: a GraphQL document of queries
   only, or a `GET` of a path on the portal, refused before anything is sent
   when it is a mutation, a query that does more than read, or a path that
   names a payment, a sign-in or sign-out, a subscription or a setting.

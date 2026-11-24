@@ -35,6 +35,8 @@ use crate::site::Provider;
 
 /// Points the reads at a test's loopback server instead of the provider's
 /// portal ([`origin`]).
+/// Required, and only a loopback origin, while a test\'s keychain service
+/// is set ([`base_from`]).
 pub const BASE_URL_ENV: &str = "FLYWIRE_BASE_URL";
 /// The least time between one answer and the next request.
 pub const PACE: Duration = Duration::from_millis(750);
@@ -51,7 +53,7 @@ pub const GRAPHQL: &str = "/graphql";
 pub const SOURCE: (&str, &str) = ("source", "patient-client");
 
 /// A test's loopback origin from [`BASE_URL_ENV`], or `None` for the real
-/// portals.
+/// portals; under a test's keychain service the override is required.
 pub fn base_override() -> Result<Option<String>, CliError> {
     base_from(
         std::env::var(BASE_URL_ENV).ok().as_deref(),
