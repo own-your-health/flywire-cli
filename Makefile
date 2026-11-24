@@ -50,7 +50,7 @@ dev:
 # browser profile: FLYWIRE_KEYCHAIN_SERVICE names a service that holds
 # nothing, with the vault under target/smoke-config, and flywire leaves the
 # kept browser profiles alone. Nothing is stored, so no key is read.
-HERMETIC := FLYWIRE_KEYCHAIN_SERVICE=piekstra.flywire.hermetic-tests XDG_DATA_HOME=$(CURDIR)/target/smoke-data \
+HERMETIC := FLYWIRE_KEYCHAIN_SERVICE=piekstra.flywire.hermetic-tests FLYWIRE_BASE_URL=http://127.0.0.1:9 XDG_DATA_HOME=$(CURDIR)/target/smoke-data \
 	XDG_CONFIG_HOME=$(CURDIR)/target/smoke-config
 smoke: build
 	@./target/debug/$(BIN) --version >/dev/null

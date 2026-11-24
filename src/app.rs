@@ -352,20 +352,26 @@ pub fn incomplete_exit(trailer: &Trailer) -> i32 {
     trailer.error.as_ref().and_then(|e| e.exit_code).unwrap_or(1)
 }
 
+/// `records export -o` on the real site: a plain file of records is for a
+/// test's server only, since medrec reads real records from the stream it
+/// runs this command for.
+fn plain_file_refused(real_site: bool, profile: &ProfileName) -> Result<(), CliError> {
+    if !real_site {
+        return Ok(());
+    }
+    Err(
+        CliError::Usage("-o writes records to a plain file, which is for tests against a local server only".into())
+            .with_remedy(format!(
+                "import real records with medrec, which runs this export itself: `medrec --profile <FOLDER> \
+         import --from flywire --from-profile {profile} --patient <ID>` (`{BIN} patients list` shows the id)"
+            )),
+    )
+}
+
 pub fn export(cli: &Cli, env: &Env, profile: &ProfileName, args: &ExportArgs) -> Result<i32, CliError> {
     let (patient, org, since) = (args.patient.as_deref(), args.org.as_deref(), args.since.as_deref());
     if let Some(dir) = &args.output {
-        // A plain file of records is for a test's server only: medrec reads
-        // real records from the stream it runs this command for.
-        if env.is_real_site() {
-            return Err(CliError::Usage(
-                "-o writes records to a plain file, which is for tests against a local server only".into(),
-            )
-            .with_remedy(format!(
-                "import real records with medrec, which runs this export itself: `medrec --profile <FOLDER> \
-                 import --from flywire --from-profile {profile} --patient <ID>` (`{BIN} patients list` shows the id)"
-            )));
-        }
+        plain_file_refused(env.is_real_site(), profile)?;
         let site = Site::open(env, profile)?;
         let origin = crate::client::origin(env.base.as_deref(), site.provider());
         let (path, finished) = export_to_dir(dir, &site, &origin, patient, org, since)?;
@@ -563,4 +569,22 @@ fn config(cli: &Cli, cmd: &ConfigCmd) -> Result<(), CliError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_file_of_real_records_is_refused_naming_medrec() {
+        let profile = ProfileName::parse("adult1").unwrap();
+        assert!(plain_file_refused(false, &profile).is_ok());
+        let e = plain_file_refused(true, &profile).unwrap_err();
+        assert_eq!(e.exit_code(), 2);
+        let remedy = e.remedy().unwrap_or_default();
+        assert!(
+            remedy.contains("import --from flywire --from-profile adult1"),
+            "{remedy}"
+        );
+    }
 }
