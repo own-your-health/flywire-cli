@@ -56,6 +56,7 @@ pub fn base_override() -> Result<Option<String>, CliError> {
     base_from(
         std::env::var(BASE_URL_ENV).ok().as_deref(),
         crate::session::is_test_store(),
+        crate::session::hermetic(),
     )
 }
 
@@ -65,14 +66,32 @@ pub fn origin(over: Option<&str>, provider: &Provider) -> String {
     over.map_or_else(|| provider.origin(), str::to_string)
 }
 
-/// The check behind [`base_override`], on the values passed in. The
+/// The refusal of a request under a test's keychain service
+/// (`session::hermetic`) with no [`BASE_URL_ENV`]: a test run reads only a
+/// server on this machine, never the real portal.
+fn hermetic_without_base() -> CliError {
+    CliError::Usage(format!(
+        "{} is set, so this is a test run, and a test run sends requests only to a server on this \
+         machine: set {BASE_URL_ENV} to its loopback origin, like http://127.0.0.1:8080 (unset {} \
+         to read the real portal)",
+        crate::session::KEYCHAIN_SERVICE_ENV,
+        crate::session::KEYCHAIN_SERVICE_ENV
+    ))
+}
+
+/// The check behind [`base_override`], on the values passed in. Under a
+/// test's keychain service (`hermetic`) the override is required, so a
+/// test that forgets it is refused before it sends anything. The
 /// override is for a test's server: a plain `http` origin on a loopback
 /// address, and only over a test's own session store
 /// (`session::is_test_store`), so no session the owner stored is sent to
 /// it. An ambient variable sending a real session elsewhere would be a way
 /// to steal it.
-pub fn base_from(value: Option<&str>, test_store: bool) -> Result<Option<String>, CliError> {
+pub fn base_from(value: Option<&str>, test_store: bool, hermetic: bool) -> Result<Option<String>, CliError> {
     let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) else {
+        if hermetic {
+            return Err(hermetic_without_base());
+        }
         return Ok(None);
     };
     let refuse = |why: &str| {
@@ -615,9 +634,26 @@ mod tests {
     }
 
     #[test]
+    fn a_test_run_without_a_base_is_refused_before_any_request() {
+        for test_store in [true, false] {
+            let e = base_from(None, test_store, true).unwrap_err();
+            assert_eq!(e.exit_code(), 2);
+            let m = e.to_string();
+            assert!(
+                m.contains(BASE_URL_ENV) && m.contains(crate::session::KEYCHAIN_SERVICE_ENV),
+                "{m}"
+            );
+        }
+        assert_eq!(
+            base_from(Some("http://127.0.0.1:8"), true, true).unwrap().as_deref(),
+            Some("http://127.0.0.1:8")
+        );
+    }
+
+    #[test]
     fn the_origin_is_the_provider_s_portal_unless_a_test_points_it_at_loopback() {
-        assert_eq!(base_from(None, false).unwrap(), None);
-        assert_eq!(base_from(Some("  "), false).unwrap(), None);
+        assert_eq!(base_from(None, false, false).unwrap(), None);
+        assert_eq!(base_from(Some("  "), false, false).unwrap(), None);
         assert_eq!(origin(None, &example()), "https://exampleclinic.simpleepay.com");
         for ok in [
             "http://127.0.0.1:8080",
@@ -625,13 +661,15 @@ mod tests {
             "http://localhost:9",
             "http://[::1]:9",
         ] {
-            let b = base_from(Some(ok), true).unwrap().unwrap();
+            let b = base_from(Some(ok), true, false).unwrap().unwrap();
             assert!(!b.ends_with('/'), "{b}");
             assert_eq!(origin(Some(&b), &example()), b);
         }
         // Without a test's own store, a real session could travel.
         assert_eq!(
-            base_from(Some("http://127.0.0.1:8080"), false).unwrap_err().exit_code(),
+            base_from(Some("http://127.0.0.1:8080"), false, false)
+                .unwrap_err()
+                .exit_code(),
             2
         );
         for bad in [
@@ -645,7 +683,7 @@ mod tests {
             "http://127.0.0.2:8",
             "127.0.0.1:8",
         ] {
-            assert_eq!(base_from(Some(bad), true).unwrap_err().exit_code(), 2, "{bad}");
+            assert_eq!(base_from(Some(bad), true, false).unwrap_err().exit_code(), 2, "{bad}");
         }
     }
 

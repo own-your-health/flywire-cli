@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- While `FLYWIRE_KEYCHAIN_SERVICE` names a test's keychain service, a command
+  that would send a request without a loopback `FLYWIRE_BASE_URL` is exit 2
+  before sending it, so a test run never reaches the real portal.
 - An answer without the accounts' list (`payables` null, and no GraphQL
   error) is exit 5 instead of a sign-in with no accounts, so `records
   export` never writes a complete stream of nothing. A bill answered
