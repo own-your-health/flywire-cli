@@ -35,7 +35,8 @@ use crate::site::Provider;
 
 /// Points the reads at a test's loopback server instead of the provider's
 /// portal ([`origin`]).
-/// Required, and only a loopback origin, while a test\'s keychain service
+///
+/// Required, and only a loopback origin, while a test's keychain service
 /// is set ([`base_from`]).
 pub const BASE_URL_ENV: &str = "FLYWIRE_BASE_URL";
 /// The least time between one answer and the next request.
