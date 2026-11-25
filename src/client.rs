@@ -49,7 +49,7 @@ const MAX_BODY: u64 = 32 * 1024 * 1024;
 pub const GRAPHQL: &str = "/graphql";
 
 /// The header the portal's app sends on every request (`source:
-/// patient-client`, observed 2026-11-22). Without it `/graphql` answers
+/// patient-client`, observed). Without it `/graphql` answers
 /// HTTP 400 with the body `{"errors": "no source found"}`, signed in or not.
 pub const SOURCE: (&str, &str) = ("source", "patient-client");
 
