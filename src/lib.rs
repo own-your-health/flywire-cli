@@ -1,6 +1,6 @@
 //! `flywire`: a patient's medical bills from a Flywire patient portal (the
-//! Simplee platform, `<provider>.simpleepay.com`), for the household
-//! medical-records system (health-records/v1, documents/v1). Read-only.
+//! Simplee platform, `<provider>.simpleepay.com`), for a personal
+//! medical-records store (health-records/v1, documents/v1). Read-only.
 
 pub mod app;
 pub mod auth;
