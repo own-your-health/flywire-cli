@@ -10,7 +10,10 @@
   `settled` state. The export counts the rest by state.
 - A voided bill is not open and not owed, whatever `amountDue` it gives,
   and only an exact `void`, `voided`, `cancelled` or `canceled` status
-  voids one.
+  voids one. So `open` (`bills list`, `bills show`), `open_bills`
+  (`accounts list`) and `bills list --open` leave voided bills out. Their
+  meaning, still owed on, and their schema ids are unchanged, and no release
+  carries the old answer.
 - A bill without `amountDue` is owed 0 when the account's other bills
   account for its `standingAmount`. Otherwise the listings warn, and
   `records export` skips it instead of writing an open Invoice without a
