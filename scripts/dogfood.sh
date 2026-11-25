@@ -135,6 +135,8 @@ value "bills show" "250.00 150.00 45.00 2" "d['totals']['billed'], d['totals']['
 code "bills show: text" 0 at "$P" "$FW" bills show BILL-0000002 "${S[@]}"
 code "bills show: unknown bill" 4 at "$P" "$FW" bills show BILL-0000009 "${S[@]}"
 value "payments list: count, settled" "8 4" "len(d['items']), sum(i['settled'] for i in d['items'])" at "$P" "$FW" payments list "${S[@]}" --json
+value "payments list: schema, states" "payment-list/v2 failed,scheduled,settled" "d['schema'], ','.join(sorted({i['state'] for i in d['items']}))" at "$P" "$FW" payments list "${S[@]}" --json
+code "payments list: table" 0 at "$P" "$FW" payments list "${S[@]}"
 value "payments list --since" "1" "len(d['items'])" at "$P" "$FW" payments list --since 2026-01-21 "${S[@]}" --json
 value "documents list" "document-list/v1 2" "d['schema'], len(d['items'])" at "$P" "$FW" documents list "${S[@]}" --json
 mkdir -p "$DOCS"

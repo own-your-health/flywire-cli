@@ -228,7 +228,8 @@ pub enum BillsCmd {
 pub struct BillsListArgs {
     #[command(flatten)]
     pub account: AccountArg,
-    /// Only bills the patient still owes on.
+    /// Only bills the patient still owes on: none voided, and none that does
+    /// not say what is owed on it.
     #[arg(long)]
     pub open: bool,
     #[command(flatten)]
@@ -245,7 +246,9 @@ pub struct BillShowArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum PaymentsCmd {
-    /// Payments, newest first, with whether each settled (payment-list/v1).
+    /// Payments, newest first, with whether each settled and where it
+    /// stands: settled, scheduled, pending, failed or unconfirmed
+    /// (payment-list/v2).
     #[command(visible_alias = "ls")]
     List(PaymentsListArgs),
 }

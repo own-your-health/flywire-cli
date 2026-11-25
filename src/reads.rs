@@ -41,7 +41,7 @@ pub struct PortalBill {
     pub name: Option<String>,
     /// The admission or service date, `YYYY-MM-DD`.
     pub date: Option<String>,
-    /// What the patient owes on it.
+    /// What the patient owes on it (`amountDue`), where the portal says.
     pub amount_due: Option<Cents>,
     pub pending_insurance: Option<Cents>,
     /// As the portal gives it; its values are not yet observed.
@@ -53,15 +53,21 @@ pub struct PortalBill {
 }
 
 impl PortalBill {
+    /// Still owed on: a voided bill is not, whatever it says.
     pub fn is_open(&self) -> bool {
-        self.amount_due.is_some_and(|c| c.0 > 0)
+        !self.is_voided() && self.amount_due.is_some_and(|c| c.0 > 0)
     }
 
+    /// Not voided, and does not say what is owed on it.
+    pub fn is_unsaid(&self) -> bool {
+        !self.is_voided() && self.amount_due.is_none()
+    }
+
+    /// The status is exactly that of a voided bill. A status that only
+    /// mentions it (`cancellation requested`) leaves the bill owed.
     pub fn is_voided(&self) -> bool {
-        self.status.as_deref().is_some_and(|s| {
-            let s = s.to_ascii_lowercase();
-            s.contains("void") || s.contains("cancel")
-        })
+        let status = self.status.as_deref().unwrap_or("").trim().to_ascii_lowercase();
+        ["void", "voided", "cancelled", "canceled"].contains(&status.as_str())
     }
 }
 
@@ -116,24 +122,100 @@ pub struct PortalPayment {
     pub method: Option<String>,
 }
 
+/// Where a payment stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settlement {
+    /// The money moved.
+    Settled,
+    /// Scheduled, or dated after today.
+    Scheduled,
+    /// Under way and not finished.
+    Pending,
+    /// Turned down, cancelled, voided, returned, charged back or refunded.
+    Failed,
+    /// No status, or one this reader does not know, so not said to be paid.
+    Unconfirmed,
+}
+
+impl Settlement {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Settlement::Settled => "settled",
+            Settlement::Scheduled => "scheduled",
+            Settlement::Pending => "pending",
+            Settlement::Failed => "failed",
+            Settlement::Unconfirmed => "unconfirmed",
+        }
+    }
+}
+
 impl PortalPayment {
-    /// Whether the money moved: not scheduled, cancelled, voided, failed,
-    /// bounced, returned, charged back or pending.
-    pub fn is_settled(&self) -> bool {
-        const NOT: &[&str] = &[
-            "schedul",
-            "cancel",
-            "void",
-            "fail",
-            "bounce",
-            "return",
-            "chargeback",
+    /// Where the payment stands on `today` (`YYYY-MM-DD`). Only a status
+    /// known to be a finished payment's makes it [`Settlement::Settled`].
+    pub fn settlement(&self, today: &str) -> Settlement {
+        const FAILED: &[&str] = &[
             "declin",
-            "pending",
+            "denied",
+            "fail",
+            "reject",
+            "void",
+            "expire",
+            "cancel",
+            "return",
+            "bounce",
+            "chargeback",
+            "chargedback",
+            "error",
+            "unauthor",
             "refund",
         ];
-        let s = self.status.as_deref().unwrap_or("").to_ascii_lowercase();
-        !NOT.iter().any(|n| s.contains(n))
+        // Before the settled words: `settlement_pending` is not a settlement.
+        const PENDING: &[&str] = &[
+            "pend",
+            "submit",
+            "settling",
+            "process",
+            "await",
+            "hold",
+            "authoriz",
+            "initiat",
+            "queued",
+            "unsettled",
+            "partial",
+        ];
+        const SETTLED: &[&str] = &[
+            "paid",
+            "settled",
+            "complete",
+            "completed",
+            "captured",
+            "posted",
+            "success",
+            "succeeded",
+            "successful",
+        ];
+        let status = self.status.as_deref().unwrap_or("").trim().to_ascii_lowercase();
+        let joined = squeezed(&status);
+        let holds = |words: &[&str]| words.iter().any(|w| joined.contains(w));
+        if holds(FAILED) {
+            return Settlement::Failed;
+        }
+        // A date after today cannot have been paid, whatever the status says.
+        if holds(&["schedul"]) || self.date.as_deref().is_some_and(|d| d > today) {
+            return Settlement::Scheduled;
+        }
+        if holds(PENDING) {
+            return Settlement::Pending;
+        }
+        if SETTLED.contains(&status.as_str()) {
+            return Settlement::Settled;
+        }
+        Settlement::Unconfirmed
+    }
+
+    /// Whether the money moved by `today`: [`Settlement::Settled`].
+    pub fn is_settled(&self, today: &str) -> bool {
+        self.settlement(today) == Settlement::Settled
     }
 }
 
@@ -246,6 +328,15 @@ fn day(v: &Value, key: &str) -> Option<String> {
     let d = s.get(..10)?;
     pk_cli_core::dates::parse_iso(d).ok()?;
     Some(d.to_string())
+}
+
+/// `s` in lower case without its spaces and punctuation, so one state's
+/// spellings (`charged back`, `Charged_Back`, `charge-back`) read alike.
+fn squeezed(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
 }
 
 fn array<'a>(v: &'a Value, key: &str) -> &'a [Value] {
@@ -697,19 +788,140 @@ mod tests {
     }
 
     #[test]
-    fn payments_that_did_not_settle_are_told_apart() {
-        let p = |s: Option<&str>| PortalPayment {
+    fn a_bill_is_open_when_it_is_owed_on_and_not_voided() {
+        let of = |due: Value, status: Value| {
+            let data = json!({"payables": {"payables": [
+                {"id": "PAY-A", "bills": [{"id": "BILL-A", "amountDue": due, "status": status}]}]}});
+            let b = payables(&data).unwrap()[0].bills[0].clone();
+            (b.is_open(), b.is_unsaid())
+        };
+        for status in [json!(null), json!("open"), json!("closed"), json!("example")] {
+            assert_eq!(of(json!(26046), status.clone()), (true, false), "{status}");
+            assert_eq!(of(json!(0), status.clone()), (false, false), "{status}");
+            assert_eq!(of(json!(-4335), status.clone()), (false, false), "{status}");
+            assert_eq!(of(json!(null), status.clone()), (false, true), "{status}");
+        }
+        for status in ["voided", "VOID", "Cancelled", "canceled"] {
+            for due in [json!(26046), json!(0), json!(null)] {
+                assert_eq!(of(due, json!(status)), (false, false), "{status}");
+            }
+        }
+        // A status that only mentions it leaves the bill owed.
+        for status in ["cancellation requested", "void pending", "not voided", "avoided"] {
+            assert_eq!(of(json!(26046), json!(status)), (true, false), "{status}");
+            assert_eq!(of(json!(null), json!(status)), (false, true), "{status}");
+        }
+    }
+
+    #[test]
+    fn only_a_positively_settled_payment_reads_as_paid() {
+        use Settlement::*;
+        let p = |date: Option<&str>, status: Option<&str>| PortalPayment {
             account: "A".into(),
-            date: None,
+            date: date.map(str::to_string),
             amount: None,
-            status: s.map(str::to_string),
+            status: status.map(str::to_string),
             method: None,
         };
-        for settled in [None, Some("Paid"), Some("success"), Some("settled")] {
-            assert!(p(settled).is_settled(), "{settled:?}");
+        let today = "2020-06-15";
+        let past = Some("2020-06-01");
+        let future = Some("2020-06-16");
+        for (words, want) in [
+            (
+                &[
+                    "Paid",
+                    "settled",
+                    "Complete",
+                    "COMPLETED",
+                    "captured",
+                    "posted",
+                    "success",
+                    "Succeeded",
+                    "successful",
+                    " paid ",
+                ][..],
+                Settled,
+            ),
+            (
+                &[
+                    "declined",
+                    "Denied",
+                    "failed",
+                    "Rejected",
+                    "VOIDED",
+                    "expired",
+                    "Cancelled",
+                    "canceled",
+                    "Returned",
+                    "bounced",
+                    "chargeback",
+                    "charge-back",
+                    "Charge Back",
+                    "charged back",
+                    "Charged_Back",
+                    "CHARGED - BACK",
+                    "error",
+                    "unauthorized",
+                    "Refunded",
+                    "settlement_declined",
+                    "partially refunded",
+                    "scheduled payment failed",
+                ],
+                Failed,
+            ),
+            (&["Scheduled", "re-scheduled", "SCHEDULED PENDING"], Scheduled),
+            (
+                &[
+                    "pending",
+                    "submitted",
+                    "Submitted_For_Settlement",
+                    "settling",
+                    "settlement_pending",
+                    "processing",
+                    "awaiting settlement",
+                    "on hold",
+                    "Authorized",
+                    "initiated",
+                    "queued",
+                    "un-settled",
+                    "partial",
+                    "partially paid",
+                ],
+                Pending,
+            ),
+            // A word no list holds, whatever it holds part of, and none.
+            (
+                &[
+                    "example",
+                    "Example word",
+                    "unpaid",
+                    "not paid",
+                    "paid in full",
+                    "not settled",
+                    "settle",
+                    "paid?",
+                    "set-tled",
+                    "charged",
+                    "charge is back",
+                    "",
+                    "  ",
+                    "--",
+                ],
+                Unconfirmed,
+            ),
+        ] {
+            for word in words {
+                assert_eq!(p(past, Some(word)).settlement(today), want, "{word}");
+                assert_eq!(p(Some(today), Some(word)).settlement(today), want, "{word} today");
+                assert_eq!(p(None, Some(word)).settlement(today), want, "{word}, no date");
+                assert_eq!(p(past, Some(word)).is_settled(today), want == Settled, "{word}");
+                // A date after today cannot have settled; a failure outranks it.
+                let later = if want == Failed { Failed } else { Scheduled };
+                assert_eq!(p(future, Some(word)).settlement(today), later, "{word} tomorrow");
+            }
         }
-        for not in ["Scheduled", "cancelled", "VOID", "bounced", "pending"] {
-            assert!(!p(Some(not)).is_settled(), "{not}");
-        }
+        assert_eq!(p(past, None).settlement(today), Unconfirmed);
+        assert_eq!(p(None, None).settlement(today), Unconfirmed);
+        assert_eq!(p(future, None).settlement(today), Scheduled);
     }
 }
