@@ -1,0 +1,48 @@
+{
+  "data": {
+    "bill": {
+      "visitNumber": "VISIT-0000006",
+      "accountNumber": "ACCT-0000002",
+      "aTotalBilled": 18064,
+      "insuranceAmount": 0,
+      "aTotalInsuranceAdjustments": 0,
+      "aPatientPayments": 18064,
+      "aTotalPatientAdjustments": 0,
+      "aPendingInsurance": 0,
+      "aInsuranceResp": 0,
+      "planCoverages": [
+        {
+          "payer": "Example Health Plan",
+          "priority": 1,
+          "insuranceName": "Example Health Plan PPO",
+          "insurancePlan": "PPO"
+        }
+      ],
+      "charges": [
+        {
+          "amount": 4941,
+          "date": "2023-03-21",
+          "description": "Note 1",
+          "cptCode": null,
+          "revenueCode": {
+            "code": "1234",
+            "translation": "Code B"
+          }
+        },
+        {
+          "amount": 13123,
+          "date": "2023-03-22",
+          "description": "Note 2",
+          "cptCode": {
+            "code": "12345",
+            "translation": "Code A"
+          },
+          "revenueCode": {
+            "code": 1234,
+            "translation": "Code B"
+          }
+        }
+      ]
+    }
+  }
+}

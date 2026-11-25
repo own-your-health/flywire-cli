@@ -2,13 +2,63 @@
   "data": {
     "previousPayments": [
       {
-        "amount": 2000,
-        "date": "2026-01-20",
+        "amount": 4771,
+        "date": "2022-06-21T06:34:15Z",
         "status": "Paid",
         "paymentMethod": {
-          "paymentType": "cash",
+          "paymentType": "paypal",
+          "paymentSubType": null,
+          "description": "PayPal"
+        }
+      },
+      {
+        "amount": 7016,
+        "date": "2023-08-31T01:04:02-05:00",
+        "status": "Paid",
+        "paymentMethod": {
+          "paymentType": "credit_card",
+          "paymentSubType": "Discover",
+          "description": null
+        }
+      },
+      {
+        "amount": 6277,
+        "date": "2019-07-26T02:35:53Z",
+        "status": "Paid",
+        "paymentMethod": {
+          "paymentType": "money_order",
           "paymentSubType": null,
           "description": null
+        }
+      },
+      {
+        "amount": 27416,
+        "date": "2021-12-05",
+        "status": "Returned",
+        "paymentMethod": {
+          "paymentType": "credit_card",
+          "paymentSubType": "Visa",
+          "description": "Visa"
+        }
+      },
+      {
+        "amount": 15374,
+        "date": "2022-06-10",
+        "status": "Failed",
+        "paymentMethod": {
+          "paymentType": "credit_card",
+          "paymentSubType": "Visa",
+          "description": "Visa"
+        }
+      },
+      {
+        "amount": 6964,
+        "date": "2022-06-25T19:31:59Z",
+        "status": "Declined",
+        "paymentMethod": {
+          "paymentType": "paypal",
+          "paymentSubType": null,
+          "description": "PayPal"
         }
       }
     ]

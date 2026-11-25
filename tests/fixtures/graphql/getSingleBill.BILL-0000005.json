@@ -1,0 +1,48 @@
+{
+  "data": {
+    "bill": {
+      "visitNumber": null,
+      "accountNumber": "ACCT-0000002",
+      "aTotalBilled": 80469,
+      "insuranceAmount": 59983,
+      "aTotalInsuranceAdjustments": 2115,
+      "aPatientPayments": 0,
+      "aTotalPatientAdjustments": 3936,
+      "aPendingInsurance": 7722,
+      "aInsuranceResp": 67705,
+      "planCoverages": [
+        {
+          "payer": "Example Secondary Plan",
+          "priority": 2,
+          "insuranceName": null,
+          "insurancePlan": null
+        },
+        {
+          "payer": "Example Health Plan",
+          "priority": 1,
+          "insuranceName": "Example Health Plan PPO",
+          "insurancePlan": "PPO"
+        }
+      ],
+      "charges": [
+        {
+          "amount": 33390,
+          "date": "2021-09-20",
+          "description": "Note 1",
+          "cptCode": null,
+          "revenueCode": null
+        },
+        {
+          "amount": 47079,
+          "date": "2021-09-23",
+          "description": "Note 2",
+          "cptCode": {
+            "code": "12345",
+            "translation": "Code A"
+          },
+          "revenueCode": null
+        }
+      ]
+    }
+  }
+}
