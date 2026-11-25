@@ -677,6 +677,12 @@ fn bills_show_reads_the_bill_s_page() {
         (&pending["charges"][0]["code"], &pending["charges"][1]["code"]),
         (&Value::Null, &json!("12345"))
     );
+    // A revenue code given as text reads as one given as a number does.
+    let text = readers::bill_show(&site, "BILL-0000006", None).unwrap();
+    assert_eq!(
+        (&text["charges"][0]["code"], &text["charges"][0]["code_system"]),
+        (&json!("1234"), &json!("revenue"))
+    );
     let ops = operations(&server);
     assert_eq!(ops[1], ("getSingleBill".into(), json!({"id": "BILL-0000001"})));
     for (id, account) in [("BILL-0000009", None), ("BILL-0000004", Some("ACCT-0000001"))] {
