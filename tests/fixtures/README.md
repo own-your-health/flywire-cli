@@ -3,8 +3,8 @@
 Everything here is synthetic. No file is a capture of a real portal's
 answer: each is shaped from the Flywire portal app's JavaScript (the
 queries' fields and nesting, `docs/api.md`), with dummy values in them
-(`exampleclinic`, `ACCT-0000001`, `BILL-0000001`, round amounts, days in
-January 2026).
+(`exampleclinic`, `ACCT-0000001`, `BILL-0000001`, invented amounts and
+days).
 
 `graphql/` holds the answers to the readers' GraphQL queries, one file per
 operation: `<operationName>.json`, or `<operationName>.<id>.json` for the

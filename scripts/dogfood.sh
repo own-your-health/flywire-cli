@@ -123,18 +123,18 @@ code "login again without --overwrite" 2 at "$P" login "$SESSION"
 code "login with a signed-out cookie" 3 at "$P" login 'other=1' --overwrite
 value "auth status" "True exampleclinic" "d['authenticated'], d.get('provider')" "$FW" auth status "${S[@]}" --json
 value "patients list" "1 org-exampleclinic" "len(d['items']), d['items'][0]['organization']" at "$P" "$FW" patients list "${S[@]}" --json
-value "accounts list: count, owed" "2 45.00 0.00" "len(d['items']), d['items'][0]['owes'], d['items'][1]['owes']" at "$P" "$FW" accounts list "${S[@]}" --json
+value "accounts list: count, owed" "2 45.00/238.49" "len(d['items']), '/'.join(i['owes'] for i in d['items'])" at "$P" "$FW" accounts list "${S[@]}" --json
 code "accounts list: table" 0 at "$P" "$FW" accounts list "${S[@]}"
-value "bills list" "4 BILL-0000004" "len(d['items']), d['items'][0]['id']" at "$P" "$FW" bills list "${S[@]}" --json
-value "bills list --open" "BILL-0000001" "' '.join(i['id'] for i in d['items'])" at "$P" "$FW" bills list --open "${S[@]}" --json
+value "bills list" "6 BILL-0000003" "len(d['items']), d['items'][0]['id']" at "$P" "$FW" bills list "${S[@]}" --json
+value "bills list --open" "BILL-0000001 BILL-0000004 BILL-0000005" "' '.join(i['id'] for i in d['items'])" at "$P" "$FW" bills list --open "${S[@]}" --json
 value "bills list --since --until" "BILL-0000003 BILL-0000002" "' '.join(i['id'] for i in d['items'])" at "$P" "$FW" bills list --since 2026-01-10 --until 2026-01-15 "${S[@]}" --json
-value "bills list --account" "1" "len(d['items'])" at "$P" "$FW" bills list --account ACCT-0000002 "${S[@]}" --json
+value "bills list --account" "3" "len(d['items'])" at "$P" "$FW" bills list --account ACCT-0000002 "${S[@]}" --json
 value "bills list --limit" "1" "len(d['items'])" at "$P" "$FW" bills list --limit 1 "${S[@]}" --json
 code "bills list --since after --until" 2 at "$P" "$FW" bills list --since 2026-01-20 --until 2026-01-10 "${S[@]}"
 value "bills show" "250.00 150.00 45.00 2" "d['totals']['billed'], d['totals']['insurance_paid'], d['totals']['owes'], len(d['charges'])" at "$P" "$FW" bills show BILL-0000001 "${S[@]}" --json
 code "bills show: text" 0 at "$P" "$FW" bills show BILL-0000002 "${S[@]}"
 code "bills show: unknown bill" 4 at "$P" "$FW" bills show BILL-0000009 "${S[@]}"
-value "payments list: count, settled" "3 2" "len(d['items']), sum(i['settled'] for i in d['items'])" at "$P" "$FW" payments list "${S[@]}" --json
+value "payments list: count, settled" "8 4" "len(d['items']), sum(i['settled'] for i in d['items'])" at "$P" "$FW" payments list "${S[@]}" --json
 value "payments list --since" "1" "len(d['items'])" at "$P" "$FW" payments list --since 2026-01-21 "${S[@]}" --json
 value "documents list" "document-list/v1 2" "d['schema'], len(d['items'])" at "$P" "$FW" documents list "${S[@]}" --json
 mkdir -p "$DOCS"
@@ -149,14 +149,14 @@ check "documents download --all: saved as sent, said so" "1" "$(grep -c 'saved a
 value "documents download --all again" "0 2" "d['count'], len(d.get('skipped', []))" at "$P" "$FW" documents download --all -o "$ALL" "${S[@]}" --json
 code "documents download: a statement with no file" 4 at "$P" "$FW" documents download STMT-0000002 -o "$DOCS" "${S[@]}"
 code "documents download --all -o -" 2 at "$P" "$FW" documents download --all -o - "${S[@]}"
-value "records export" "True 4 2 1 1" "d['complete'], d['counts']['Invoice'], d['counts']['PaymentReconciliation'], d['counts']['DocumentReference'], d['counts']['Binary']" at "$P" "$FW" records export "${S[@]}" --ndjson
+value "records export" "True 6 4 1 1" "d['complete'], d['counts']['Invoice'], d['counts']['PaymentReconciliation'], d['counts']['DocumentReference'], d['counts']['Binary']" at "$P" "$FW" records export "${S[@]}" --ndjson
 value "records export: header" "records-stream/v1 portal" "lines[0]['schema'], lines[0]['method']" at "$P" "$FW" records export "${S[@]}" --ndjson
-value "records export: skipped" "not_settled verify_failed" "' '.join(s['code'] for s in d['skipped'])" at "$P" "$FW" records export "${S[@]}" --ndjson
-value "records export --since" "True 2 1" "d['complete'], d['counts']['Invoice'], d['counts']['PaymentReconciliation']" at "$P" "$FW" records export --since 2026-01-15 "${S[@]}" --ndjson
+value "records export: skipped" "not_settled not_settled verify_failed" "' '.join(s['code'] for s in d['skipped'])" at "$P" "$FW" records export "${S[@]}" --ndjson
+value "records export --since" "True 5 3" "d['complete'], d['counts']['Invoice'], d['counts']['PaymentReconciliation']" at "$P" "$FW" records export --since 2022-06-15 "${S[@]}" --ndjson
 PATIENT=$(at "$P" "$FW" patients list "${S[@]}" --json | python3 -I -c "import json,sys; print(json.load(sys.stdin)['items'][0]['id'])")
 code "records export --patient --org" 0 at "$P" "$FW" records export --patient "$PATIENT" --org org-exampleclinic "${S[@]}" --ndjson
 code "records export -o" 0 at "$P" "$FW" records export "${S[@]}" -o "$OUT"
-check "records export -o: lines" "14" "$(wc -l <"$OUT/records.ndjson" | tr -d ' ')"
+check "records export -o: lines" "18" "$(wc -l <"$OUT/records.ndjson" | tr -d ' ')"
 code "another patient's --patient" 4 at "$P" "$FW" records export --patient patient-other "${S[@]}" --ndjson
 code "another provider's --org" 4 at "$P" "$FW" records export --org org-other "${S[@]}" --ndjson
 code "records export without a destination" 2 at "$P" "$FW" records export "${S[@]}"
@@ -179,14 +179,14 @@ code "guarantor refused: patients list" 5 at "$G" "$FW" patients list "${S[@]}"
 check "guarantor refused: said so" "1" "$(grep -c 'named no guarantor' "$T/err")"
 code "guarantor refused: records export" 5 at "$G" "$FW" records export "${S[@]}" --ndjson
 check "guarantor refused: nothing on stdout" "0" "$(wc -c <"$T/out" | tr -d ' ')"
-value "guarantor refused: bills list still reads" "4" "len(d['items'])" at "$G" "$FW" bills list "${S[@]}" --json
+value "guarantor refused: bills list still reads" "6" "len(d['items'])" at "$G" "$FW" bills list "${S[@]}" --json
 code "guarantor query HTTP 503" 5 at "$H" "$FW" patients list "${S[@]}"
 check "guarantor query HTTP 503: names the status" "1" "$(grep -c 'HTTP 503' "$T/err")"
 code "accounts answered without the list" 5 at "$N" "$FW" accounts list "${S[@]}"
 code "accounts without the list: export" 5 at "$N" "$FW" records export "${S[@]}" --ndjson
 check "accounts without the list: nothing on stdout" "0" "$(wc -c <"$T/out" | tr -d ' ')"
 code "a bill answered without the bill" 5 at "$B" "$FW" bills show BILL-0000001 "${S[@]}"
-value "a bill without the bill: export skips it" "True 3 True" "d['complete'], d['counts']['Invoice'], 'upstream' in [s['code'] for s in d['skipped']]" at "$B" "$FW" records export "${S[@]}" --ndjson
+value "a bill without the bill: export skips it" "True 5 True" "d['complete'], d['counts']['Invoice'], 'upstream' in [s['code'] for s in d['skipped']]" at "$B" "$FW" records export "${S[@]}" --ndjson
 code "server down" 5 at "$DOWN" "$FW" accounts list "${S[@]}"
 code "a base that is not loopback" 2 env FLYWIRE_BASE_URL=http://example.com "$FW" accounts list "${S[@]}"
 code "config path" 0 "$FW" config path

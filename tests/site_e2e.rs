@@ -543,9 +543,24 @@ fn accounts_list_shows_what_is_owed_on_each() {
         json!([
             {"id": "PAY-0000001", "number": "ACCT-0000001", "provider": "Example Clinic", "owes": "45.00",
              "pending_insurance": "0.00", "bills": 3, "open_bills": 1},
-            {"id": "PAY-0000002", "number": "ACCT-0000002", "provider": "Example Clinic", "owes": "0.00",
-             "pending_insurance": "15.00", "bills": 1, "open_bills": 0},
+            {"id": "PAY-0000002", "number": "ACCT-0000002", "provider": "Example Clinic", "owes": "238.49",
+             "pending_insurance": "77.22", "bills": 3, "open_bills": 2},
         ])
+    );
+    // The answers agree: an account's standing amount is its bills' amounts
+    // due, and the sign-in's is the accounts'.
+    let answer = |name: &str| serde_json::from_str::<Value>(&fixture(name)).unwrap();
+    let accounts = answer("payables.json")["data"]["payables"]["payables"].clone();
+    let mut standing = 0;
+    for a in accounts.as_array().unwrap() {
+        let due = a["bills"].as_array().unwrap().iter().map(|b| b["amountDue"].as_i64());
+        let due: i64 = due.map(Option::unwrap).sum();
+        assert_eq!(a["standingAmount"], due, "{}", a["id"]);
+        standing += due;
+    }
+    assert_eq!(
+        answer("payableStandingAmount.json")["data"]["payableStandingAmount"],
+        standing
     );
     let seen = server.seen.lock().unwrap().clone();
     assert_eq!(seen.len(), 1);
@@ -561,24 +576,37 @@ fn bills_list_is_newest_first_and_filters() {
     assert_eq!(v["schema"], "bill-list/v1");
     assert_eq!(
         ids(&v, "id"),
-        ["BILL-0000004", "BILL-0000003", "BILL-0000002", "BILL-0000001"]
+        [
+            "BILL-0000003",
+            "BILL-0000002",
+            "BILL-0000001",
+            "BILL-0000004",
+            "BILL-0000006",
+            "BILL-0000005"
+        ]
     );
     assert_eq!(
-        v["items"][3],
+        v["items"][2],
         json!({"id": "BILL-0000001", "account": "ACCT-0000001", "date": "2026-01-05", "description": "Office visit",
                "owes": "45.00", "pending_insurance": "0.00", "status": "open", "claim": "CLM-0000001",
                "visit_type": "PB", "open": true})
     );
+    assert_eq!(
+        v["items"][5],
+        json!({"id": "BILL-0000005", "account": "ACCT-0000002", "date": "2021-09-20", "description": "Fee B",
+               "owes": "67.13", "pending_insurance": "77.22", "status": "open", "claim": null,
+               "visit_type": "PB", "open": true})
+    );
     // A date-time is its day; a null amount is null.
-    assert_eq!(v["items"][2]["date"], "2026-01-10");
-    assert_eq!(v["items"][1]["pending_insurance"], Value::Null);
+    assert_eq!(v["items"][1]["date"], "2026-01-10");
+    assert_eq!(v["items"][0]["pending_insurance"], Value::Null);
 
     let open = readers::bills_list(&site, None, true, &RangeArgs::default()).unwrap();
-    assert_eq!(ids(&open, "id"), ["BILL-0000001"]);
+    assert_eq!(ids(&open, "id"), ["BILL-0000001", "BILL-0000004", "BILL-0000005"]);
     let ranged = readers::bills_list(&site, None, false, &range(Some("2026-1-10"), Some("2026-01-15"))).unwrap();
     assert_eq!(ids(&ranged, "id"), ["BILL-0000003", "BILL-0000002"]);
     let one = readers::bills_list(&site, Some("ACCT-0000002"), false, &RangeArgs::default()).unwrap();
-    assert_eq!(ids(&one, "id"), ["BILL-0000004"]);
+    assert_eq!(ids(&one, "id"), ["BILL-0000004", "BILL-0000006", "BILL-0000005"]);
     let limited = readers::bills_list(
         &site,
         None,
@@ -588,7 +616,7 @@ fn bills_list_is_newest_first_and_filters() {
             ..RangeArgs::default()
         },
     );
-    assert_eq!(ids(&limited.unwrap(), "id"), ["BILL-0000004"]);
+    assert_eq!(ids(&limited.unwrap(), "id"), ["BILL-0000003"]);
     let e = readers::bills_list(&site, Some("ACCT-0000009"), false, &RangeArgs::default())
         .err()
         .unwrap();
@@ -629,6 +657,32 @@ fn bills_show_reads_the_bill_s_page() {
     assert_eq!(lab["charges"][0]["code_system"], "revenue");
     assert_eq!(lab["charges"][0]["date"], Value::Null);
     assert_eq!(lab["totals"]["patient_adjustments"], Value::Null);
+    // A bill that waits on a second plan: the plans by their priority,
+    // whatever the answer's order, and what is pending.
+    let pending = readers::bill_show(&site, "BILL-0000005", None).unwrap();
+    assert_eq!(
+        pending["plans"],
+        json!([
+            {"priority": 1, "insurance": "Example Health Plan PPO", "payer": "Example Health Plan", "plan": "PPO"},
+            {"priority": 2, "insurance": null, "payer": "Example Secondary Plan", "plan": null},
+        ])
+    );
+    assert_eq!(
+        pending["totals"],
+        json!({"billed": "804.69", "insurance_paid": "599.83", "insurance_adjustments": "21.15",
+               "patient_paid": "0.00", "patient_adjustments": "39.36", "pending_insurance": "77.22",
+               "insurance_responsibility": "677.05", "owes": "67.13"})
+    );
+    assert_eq!(
+        (&pending["charges"][0]["code"], &pending["charges"][1]["code"]),
+        (&Value::Null, &json!("12345"))
+    );
+    // A revenue code given as text reads as one given as a number does.
+    let text = readers::bill_show(&site, "BILL-0000006", None).unwrap();
+    assert_eq!(
+        (&text["charges"][0]["code"], &text["charges"][0]["code_system"]),
+        (&json!("1234"), &json!("revenue"))
+    );
     let ops = operations(&server);
     assert_eq!(ops[1], ("getSingleBill".into(), json!({"id": "BILL-0000001"})));
     for (id, account) in [("BILL-0000009", None), ("BILL-0000004", Some("ACCT-0000001"))] {
@@ -649,9 +703,19 @@ fn payments_list_is_newest_first_settled_or_not() {
         json!([
             {"account": "ACCT-0000001", "date": "2026-01-30", "amount": "45.00", "method": "Visa",
              "status": "Scheduled", "settled": false},
-            {"account": "ACCT-0000002", "date": "2026-01-20", "amount": "20.00", "method": "cash",
-             "status": "Paid", "settled": true},
             {"account": "ACCT-0000001", "date": "2026-01-05", "amount": "5.00", "method": "Visa",
+             "status": "Paid", "settled": true},
+            {"account": "ACCT-0000002", "date": "2023-08-31", "amount": "70.16", "method": "Discover",
+             "status": "Paid", "settled": true},
+            {"account": "ACCT-0000002", "date": "2022-06-25", "amount": "69.64", "method": "PayPal",
+             "status": "Declined", "settled": false},
+            {"account": "ACCT-0000002", "date": "2022-06-21", "amount": "47.71", "method": "PayPal",
+             "status": "Paid", "settled": true},
+            {"account": "ACCT-0000002", "date": "2022-06-10", "amount": "153.74", "method": "Visa",
+             "status": "Failed", "settled": false},
+            {"account": "ACCT-0000002", "date": "2021-12-05", "amount": "274.16", "method": "Visa",
+             "status": "Returned", "settled": false},
+            {"account": "ACCT-0000002", "date": "2019-07-26", "amount": "62.77", "method": "money_order",
              "status": "Paid", "settled": true},
         ])
     );
@@ -671,12 +735,13 @@ fn documents_list_shows_the_statements_with_a_file() {
     let site = Site::open(&env, &adult1()).unwrap();
     let (_, docs) = readers::documents(&site, None, &RangeArgs::default()).unwrap();
     let listed: Vec<(&str, Option<&str>)> = docs.iter().map(|(d, _)| (d.id.as_str(), d.date.as_deref())).collect();
-    // STMT-0000002 has no statement id or upload: the app lists it nowhere.
+    // STMT-0000002 has no statement id or upload, and STMT-0000004 no
+    // upload: the app lists them nowhere.
     assert_eq!(
         listed,
         [
-            ("statement-ACCT-0000002-STMT-0000003", Some("2026-01-30")),
             ("statement-ACCT-0000001-STMT-0000001", Some("2026-01-25")),
+            ("statement-ACCT-0000002-STMT-0000003", Some("2019-06-05")),
         ]
     );
     assert_eq!(docs[0].0.category.as_deref(), Some("statement"));
@@ -736,7 +801,7 @@ fn documents_download_decodes_the_statement_file() {
     let Downloaded::Batch { batch, as_sent } = all else {
         panic!("{all:?}")
     };
-    let raw = "2026-01-30_exampleclinic-statement_STMT-0000003.bin";
+    let raw = "2019-06-05_exampleclinic-statement_STMT-0000003.bin";
     assert_eq!(as_sent, [raw]);
     assert_eq!(batch.count, 1);
     assert_eq!(batch.skipped.len(), 1);
@@ -752,7 +817,9 @@ fn documents_download_decodes_the_statement_file() {
         panic!("{all:?}")
     };
     assert_eq!((batch.count, batch.skipped.len()), (0, 2));
-    assert!(batch.skipped[0].reason.contains("--overwrite"), "{:?}", batch.skipped);
+    let other = &batch.skipped[1];
+    assert_eq!(other.id, "statement-ACCT-0000002-STMT-0000003");
+    assert!(other.reason.contains("--overwrite"), "{:?}", batch.skipped);
     assert_eq!(std::fs::read_to_string(dir.join(raw)).unwrap(), "kept");
     let e = readers::download(&site, &download_args(Some("STMT-0000002"), false, Some(dir.clone())));
     assert_eq!(
@@ -825,6 +892,10 @@ fn the_export_is_bills_payments_and_statements_as_fhir() {
             "Invoice",
             "Invoice",
             "Invoice",
+            "Invoice",
+            "Invoice",
+            "PaymentReconciliation",
+            "PaymentReconciliation",
             "PaymentReconciliation",
             "PaymentReconciliation",
             "DocumentReference",
@@ -908,6 +979,17 @@ fn the_export_is_bills_payments_and_statements_as_fhir() {
         component(&voided["totalPriceComponent"], "billed").as_deref(),
         Some("120.00")
     );
+    // The second account's bills, each with what is owed on it.
+    for (id, status, net) in [
+        ("bill-ACCT-0000002-BILL-0000004", "issued", "171.36"),
+        ("bill-ACCT-0000002-BILL-0000005", "issued", "67.13"),
+        ("bill-ACCT-0000002-BILL-0000006", "balanced", "0.00"),
+    ] {
+        let bill = by_id(id);
+        assert_eq!(bill["status"], status, "{id}");
+        assert_eq!(bill["totalNet"]["value"].to_string(), net, "{id}");
+        assert_eq!(bill["account"]["reference"], "Account/account-ACCT-0000002", "{id}");
+    }
 
     let payments: Vec<&Value> = resources
         .iter()
@@ -926,10 +1008,14 @@ fn the_export_is_bills_payments_and_statements_as_fhir() {
         paid,
         [
             ("2026-01-05".into(), "5.00".into()),
-            ("2026-01-20".into(), "20.00".into())
+            ("2023-08-31".into(), "70.16".into()),
+            ("2022-06-21".into(), "47.71".into()),
+            ("2019-07-26".into(), "62.77".into())
         ]
     );
     assert_eq!(payments[0]["disposition"], "Paid by Visa");
+    // Neither a card nor described: worded by its type.
+    assert_eq!(payments[3]["disposition"], "Paid by money_order");
     // The portal says which provider a payment paid, not which bills.
     assert_eq!(
         payments[0]["detail"][0]["payee"]["display"],
@@ -960,43 +1046,56 @@ fn the_export_is_bills_payments_and_statements_as_fhir() {
     assert!(bytes.starts_with(b"%PDF-1.4"));
     assert_eq!(doc["content"][0]["attachment"]["size"], bytes.len());
 
-    assert_eq!(trailer.counts.get("Invoice"), Some(&4));
+    assert_eq!(trailer.counts.get("Invoice"), Some(&6));
     let skipped: Vec<(&str, Option<&str>)> = trailer
         .skipped
         .iter()
         .map(|s| (s.code.as_str(), s.resource_type.as_deref()))
         .collect();
+    // One skip per account for the payments that did not settle.
     assert_eq!(
         skipped,
         [
             ("not_settled", Some("PaymentReconciliation")),
+            ("not_settled", Some("PaymentReconciliation")),
             ("verify_failed", Some("DocumentReference")),
         ]
     );
+    for (i, says) in [(0, "1 payment(s)"), (1, "3 payment(s)")] {
+        assert!(
+            trailer.skipped[i].reason.starts_with(says),
+            "{}",
+            trailer.skipped[i].reason
+        );
+    }
 }
 
 #[test]
 fn the_export_since_a_day_keeps_the_accounts() {
-    let server = serve(fixture_routes(), None);
-    let env = env(&server, "export-since");
-    let site = Site::open(&env, &adult1()).unwrap();
-    let mut out = Vec::new();
-    readers::export(&site, &server.base, &mut out, None, None, Some("2026-01-15")).unwrap();
-    let (header, resources, _) = read_stream(&out);
-    assert_eq!(header.since.as_deref(), Some("2026-01-15"));
-    let ids: Vec<&str> = resources.iter().map(|r| r["id"].as_str().unwrap()).collect();
-    assert!(ids.contains(&"account-ACCT-0000001"));
-    assert!(ids.contains(&"bill-ACCT-0000001-BILL-0000003"));
-    assert!(!ids.contains(&"bill-ACCT-0000001-BILL-0000001"));
-    assert_eq!(
-        resources
-            .iter()
-            .filter(|r| r["resourceType"] == "PaymentReconciliation")
-            .count(),
-        1
-    );
-    // Bills before the day are not read at all.
-    assert!(!operations(&server).contains(&("getSingleBill".into(), json!({"id": "BILL-0000001"}))));
+    for (since, account, kept, left_out, invoices, payments) in [
+        ("2026-01-15", "ACCT-0000001", "BILL-0000003", "BILL-0000001", 1, 0),
+        ("2022-06-15", "ACCT-0000002", "BILL-0000006", "BILL-0000005", 5, 3),
+    ] {
+        let server = serve(fixture_routes(), None);
+        let env = env(&server, "export-since");
+        let site = Site::open(&env, &adult1()).unwrap();
+        let mut out = Vec::new();
+        readers::export(&site, &server.base, &mut out, None, None, Some(since)).unwrap();
+        let (header, resources, _) = read_stream(&out);
+        assert_eq!(header.since.as_deref(), Some(since));
+        let ids: Vec<&str> = resources.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert!(ids.contains(&"account-ACCT-0000001") && ids.contains(&"account-ACCT-0000002"));
+        assert!(ids.contains(&format!("bill-{account}-{kept}").as_str()));
+        assert!(!ids.contains(&format!("bill-{account}-{left_out}").as_str()));
+        let count = |t: &str| resources.iter().filter(|r| r["resourceType"] == t).count();
+        assert_eq!(
+            (count("Invoice"), count("PaymentReconciliation")),
+            (invoices, payments),
+            "{since}"
+        );
+        // Bills before the day are not read at all.
+        assert!(!operations(&server).contains(&("getSingleBill".into(), json!({"id": left_out}))));
+    }
 }
 
 #[test]
@@ -1034,7 +1133,7 @@ fn a_statement_with_no_file_is_skipped_in_the_export() {
     let (_, resources, trailer) = read_stream(&out);
     assert!(!resources.iter().any(|r| r["resourceType"] == "DocumentReference"));
     let codes: Vec<&str> = trailer.skipped.iter().map(|s| s.code.as_str()).collect();
-    assert_eq!(codes, ["not_settled", "no_file", "verify_failed"]);
+    assert_eq!(codes, ["not_settled", "not_settled", "no_file", "verify_failed"]);
 }
 
 #[test]
@@ -1078,8 +1177,8 @@ fn a_graphql_error_on_one_bill_is_exit_5_and_a_skip_in_the_export() {
     let finished = readers::export(&site, &server.base, &mut out, None, None, None).unwrap();
     assert!(finished.trailer.complete, "one bill does not stop the rest");
     let (_, resources, trailer) = read_stream(&out);
-    assert_eq!(trailer.counts.get("Invoice"), Some(&3));
-    assert_eq!(trailer.counts.get("PaymentReconciliation"), Some(&2));
+    assert_eq!(trailer.counts.get("Invoice"), Some(&5));
+    assert_eq!(trailer.counts.get("PaymentReconciliation"), Some(&4));
     assert_eq!(trailer.counts.get("DocumentReference"), Some(&1));
     assert!(!resources.iter().any(|r| r["id"] == "bill-ACCT-0000001-BILL-0000001"));
     let skip = &trailer.skipped[0];
@@ -1107,7 +1206,7 @@ fn a_bill_answered_without_the_bill_is_exit_5_and_a_skip_in_the_export() {
     let finished = readers::export(&site, &server.base, &mut out, None, None, None).unwrap();
     assert!(finished.trailer.complete);
     let (_, resources, trailer) = read_stream(&out);
-    assert_eq!(trailer.counts.get("Invoice"), Some(&3));
+    assert_eq!(trailer.counts.get("Invoice"), Some(&5));
     assert!(!resources.iter().any(|r| r["id"] == "bill-ACCT-0000001-BILL-0000001"));
     let skip = &trailer.skipped[0];
     assert_eq!(
