@@ -62,7 +62,7 @@ there. flywire never fills or submits the form.
   host. The site sets cookies before anyone signs in, so a cookie alone
   does not show a session.
 - Every request the app sends carries the header `source: patient-client`
-  (observed 2026-11-22). `/graphql` answers a request without it HTTP 400
+  (*observed*). `/graphql` answers a request without it HTTP 400
   with the body `{"errors": "no source found"}`, signed in or not. flywire
   sends it on every request, and reads that answer as the app's requests
   having changed (exit 5), not as a sign-in that ended.
@@ -143,7 +143,7 @@ is written as the portal sent it, with a `.bin` name and a warning on
 `documents download`; `records export` skips that statement
 (`verify_failed`) rather than write a Binary it cannot type.
 
-### Open problem: `payables` after the sign-in (2026-11-22)
+### Open problem: `payables` with a captured session
 
 With a session `auth login` captured, `payableStandingAmount` answers, but
 `payables` answers HTTP 200 with `data.payables` null and one error,
