@@ -3,6 +3,7 @@
 //! tests run them in-process against a loopback server with the session in
 //! an in-memory vault ([`Env`]).
 
+use std::cell::RefCell;
 use std::time::Duration;
 
 use pk_cli_config::profile::ProfileName;
@@ -23,10 +24,12 @@ pub struct Env {
     pub base: Option<String>,
     /// The least time between one answer and the next request.
     pub pace: Duration,
+    pub warnings: Warnings,
 }
 
 impl Env {
-    /// The binary's: the vault, each session's portal, [`client::PACE`] apart.
+    /// The binary's: the vault, each session's portal, [`client::PACE`]
+    /// apart, warnings on stderr.
     pub fn for_binary() -> Result<Env, CliError> {
         // The base first: a refused override reaches no vault.
         let base = client::base_override()?;
@@ -34,6 +37,7 @@ impl Env {
             sessions: SessionStore::open()?,
             base,
             pace: client::PACE,
+            warnings: Warnings::stderr(),
         })
     }
 
@@ -43,12 +47,39 @@ impl Env {
     }
 }
 
+/// Where a warning goes: stderr for the binary, a list for a test.
+pub struct Warnings(Option<RefCell<Vec<String>>>);
+
+impl Warnings {
+    pub fn stderr() -> Warnings {
+        Warnings(None)
+    }
+
+    /// Kept for [`lines`](Self::lines) instead of printed.
+    pub fn kept() -> Warnings {
+        Warnings(Some(RefCell::default()))
+    }
+
+    pub fn warn(&self, line: String) {
+        match &self.0 {
+            None => eprintln!("warning: {line}"),
+            Some(kept) => kept.borrow_mut().push(line),
+        }
+    }
+
+    /// The warnings kept so far.
+    pub fn lines(&self) -> Vec<String> {
+        self.0.as_ref().map(|k| k.borrow().clone()).unwrap_or_default()
+    }
+}
+
 /// A profile's signed-in reads.
 pub struct Site<'a> {
     client: Client,
     profile: ProfileName,
     session: Session,
     store: &'a SessionStore,
+    warnings: &'a Warnings,
 }
 
 impl<'a> Site<'a> {
@@ -62,6 +93,7 @@ impl<'a> Site<'a> {
             profile: profile.clone(),
             session,
             store: &env.sessions,
+            warnings: &env.warnings,
         })
     }
 
@@ -79,6 +111,10 @@ impl<'a> Site<'a> {
     /// The provider whose portal this session signs in to.
     pub fn provider(&self) -> &Provider {
         &self.session.provider
+    }
+
+    pub fn warn(&self, line: String) {
+        self.warnings.warn(line);
     }
 
     /// The accounts, open and closed bills included (`payables`).

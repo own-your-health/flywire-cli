@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use flywire::cli::{AccountArg, ApiMethod, DownloadArgs};
 use flywire::client::{api_request, ApiRequest};
-use flywire::portal::{Env, Site};
+use flywire::portal::{Env, Site, Warnings};
 use flywire::readers::{self, Downloaded};
 use flywire::session::{Session, SessionStore};
 use flywire::site::Provider;
@@ -199,6 +199,7 @@ fn env(server: &Server, tag: &str) -> Env {
         sessions: store,
         base: Some(server.base.clone()),
         pace: Duration::ZERO,
+        warnings: Warnings::kept(),
     }
 }
 
@@ -295,6 +296,7 @@ fn the_api_returns_the_answer_whole() {
 fn no_session_is_exit_3_naming_the_sign_in() {
     let server = serve(routes(), None);
     let env = Env {
+        warnings: Warnings::kept(),
         sessions: SessionStore::with_vault(Vault::new(MemoryKeys::new(), temp_dir("none"))),
         base: Some(server.base.clone()),
         pace: Duration::ZERO,
@@ -697,26 +699,30 @@ fn payments_list_is_newest_first_settled_or_not() {
     let env = env(&server, "payments");
     let site = Site::open(&env, &adult1()).unwrap();
     let v = readers::payments_list(&site, None, &RangeArgs::default()).unwrap();
-    assert_eq!(v["schema"], "payment-list/v1");
+    assert_eq!(v["schema"], "payment-list/v2");
+    assert_eq!(
+        readers::PAYMENT_COLUMNS,
+        ["date", "account", "amount", "method", "status", "settled", "state"]
+    );
     assert_eq!(
         v["items"],
         json!([
             {"account": "ACCT-0000001", "date": "2026-01-30", "amount": "45.00", "method": "Visa",
-             "status": "Scheduled", "settled": false},
+             "status": "Scheduled", "settled": false, "state": "scheduled"},
             {"account": "ACCT-0000001", "date": "2026-01-05", "amount": "5.00", "method": "Visa",
-             "status": "Paid", "settled": true},
+             "status": "Paid", "settled": true, "state": "settled"},
             {"account": "ACCT-0000002", "date": "2023-08-31", "amount": "70.16", "method": "Discover",
-             "status": "Paid", "settled": true},
+             "status": "Paid", "settled": true, "state": "settled"},
             {"account": "ACCT-0000002", "date": "2022-06-25", "amount": "69.64", "method": "PayPal",
-             "status": "Declined", "settled": false},
+             "status": "Declined", "settled": false, "state": "failed"},
             {"account": "ACCT-0000002", "date": "2022-06-21", "amount": "47.71", "method": "PayPal",
-             "status": "Paid", "settled": true},
+             "status": "Paid", "settled": true, "state": "settled"},
             {"account": "ACCT-0000002", "date": "2022-06-10", "amount": "153.74", "method": "Visa",
-             "status": "Failed", "settled": false},
+             "status": "Failed", "settled": false, "state": "failed"},
             {"account": "ACCT-0000002", "date": "2021-12-05", "amount": "274.16", "method": "Visa",
-             "status": "Returned", "settled": false},
+             "status": "Returned", "settled": false, "state": "failed"},
             {"account": "ACCT-0000002", "date": "2019-07-26", "amount": "62.77", "method": "money_order",
-             "status": "Paid", "settled": true},
+             "status": "Paid", "settled": true, "state": "settled"},
         ])
     );
     let ops = operations(&server);
@@ -1061,12 +1067,19 @@ fn the_export_is_bills_payments_and_statements_as_fhir() {
             ("verify_failed", Some("DocumentReference")),
         ]
     );
-    for (i, says) in [(0, "1 payment(s)"), (1, "3 payment(s)")] {
-        assert!(
-            trailer.skipped[i].reason.starts_with(says),
-            "{}",
-            trailer.skipped[i].reason
-        );
+    for (i, says) in [
+        (
+            0,
+            "0 payment(s) turned down (declined, failed, voided), 1 scheduled or pending and 0 not shown to have \
+             settled were left out",
+        ),
+        (
+            1,
+            "3 payment(s) turned down (declined, failed, voided), 0 scheduled or pending and 0 not shown to have \
+             settled were left out",
+        ),
+    ] {
+        assert_eq!(trailer.skipped[i].reason, says);
     }
 }
 
@@ -1134,6 +1147,407 @@ fn a_statement_with_no_file_is_skipped_in_the_export() {
     assert!(!resources.iter().any(|r| r["resourceType"] == "DocumentReference"));
     let codes: Vec<&str> = trailer.skipped.iter().map(|s| s.code.as_str()).collect();
     assert_eq!(codes, ["not_settled", "not_settled", "no_file", "verify_failed"]);
+}
+
+// ------------------------------------------- bills and payments, by account
+
+/// One bill: what is due on it, `null` for a bill that does not say.
+fn bill_of(id: &str, date: &str, due: Value, status: &str) -> Value {
+    json!({ "id": id, "admissionDate": date, "amountDue": due, "displayName": "Fee A", "status": status })
+}
+
+/// One payment, with a status or without (`null`).
+fn payment_of(date: &str, amount: i64, status: Value, method: &str) -> Value {
+    json!({ "amount": amount, "date": date, "status": status, "paymentMethod": { "paymentType": method } })
+}
+
+/// A sign-in of the accounts `accounts`, each a letter (`PAY-A`, `ACCT-A`),
+/// its standing amount, its bills and its payments, with no statements. Every
+/// bill's page is the same.
+fn accounts_of(accounts: &[(&str, Value, Vec<Value>, Vec<Value>)]) -> Routes {
+    let mut r = fixture_routes();
+    let mut put = |key: String, data: Value| r.insert(key, (200, JSON, json!({ "data": data }).to_string()));
+    let mut payables = Vec::new();
+    for (letter, standing, bills, payments) in accounts {
+        payables.push(json!({
+            "id": format!("PAY-{letter}"),
+            "accountNumber": format!("ACCT-{letter}"),
+            "standingAmount": standing,
+            "bills": bills,
+            "payee": { "companyDisplayName": "Example Clinic" },
+        }));
+        put(
+            format!("POST graphql previousPayments PAY-{letter}"),
+            json!({ "previousPayments": payments }),
+        );
+    }
+    put(
+        "POST graphql payables".into(),
+        json!({ "payables": { "payables": payables } }),
+    );
+    put(
+        "POST graphql pastStatementsInfo".into(),
+        json!({ "pastStatementsInfo": [] }),
+    );
+    let charges = json!([{ "amount": 44490, "date": null, "description": "Note 1" }]);
+    put(
+        "POST graphql getSingleBill".into(),
+        json!({ "bill": { "aTotalBilled": 44490, "charges": charges } }),
+    );
+    r
+}
+
+fn payments_a() -> Vec<Value> {
+    vec![
+        payment_of("2021-07-04T06:55:08Z", 27756, json!("Paid"), "cash"),
+        payment_of("2024-03-26T01:29:37Z", 56917, json!("Posted"), "check"),
+        payment_of("2019-03-31T09:37:36Z", 72129, json!("Voided"), "check"),
+        payment_of("2020-08-25T13:00:36Z", 18640, json!("Example word"), "cash"),
+        payment_of("2019-12-11T21:58:02Z", 53312, json!("Pending"), "money_order"),
+    ]
+}
+
+/// Two bills that do not say what is due on them, one for want of the field;
+/// three that do, 242.60 in all; and two voided, one of which says 639.86 and
+/// one nothing.
+fn bills_a() -> Vec<Value> {
+    let mut missing = bill_of("BILL-D", "2022-02-11", json!(null), "open");
+    missing.as_object_mut().unwrap().remove("amountDue");
+    vec![
+        bill_of("BILL-A", "2024-11-02", json!(18869), "open"),
+        bill_of("BILL-B", "2020-03-28", json!(0), "closed"),
+        bill_of("BILL-C", "2021-03-12", json!(63986), "Voided"),
+        missing,
+        bill_of("BILL-E", "2021-09-18", json!(null), "example"),
+        bill_of("BILL-F", "2024-05-30", json!(5391), "open"),
+        bill_of("BILL-G", "2021-02-13", json!(null), "cancelled"),
+    ]
+}
+
+fn payments_b() -> Vec<Value> {
+    vec![
+        payment_of("2021-04-30T20:36:58Z", 88979, json!("Paid"), "check"),
+        payment_of("2999-08-18", 77334, json!("Scheduled"), "cash"),
+        payment_of("2021-05-21T05:32:34Z", 30673, json!("Settled"), "cash"),
+        payment_of("2022-03-09T10:32:26Z", 63146, json!("Voided"), "cash"),
+        payment_of("2019-07-29T00:56:34Z", 54397, json!("Refunded"), "cash"),
+        payment_of("2024-10-02T22:49:26Z", 3623, json!("Example word"), "check"),
+        payment_of("2999-11-24", 8769, json!("Paid"), "money_order"),
+        payment_of("2023-02-12T03:35:49Z", 22780, json!("Posted"), "cash"),
+        payment_of("2024-04-13T12:54:44Z", 15064, json!("Authorized"), "cash"),
+        payment_of("2019-02-12T17:25:07Z", 86936, json!("Processing"), "money_order"),
+        payment_of("2019-01-17T08:16:41Z", 8823, json!("Declined"), "check"),
+        payment_of("2022-02-11T03:29:08Z", 67043, json!(null), "money_order"),
+        payment_of("2999-12-24", 2419, json!("Cancelled"), "money_order"),
+        payment_of("2019-02-07T14:01:56Z", 47677, json!("Charged Back"), "cash"),
+        payment_of("2019-04-13T09:09:56Z", 83179, json!(""), "money_order"),
+    ]
+}
+
+/// Four bills, none of which says what is due on it.
+fn bills_b() -> Vec<Value> {
+    [
+        ("BILL-H", "2022-08-20"),
+        ("BILL-I", "2020-08-26"),
+        ("BILL-J", "2023-06-14"),
+        ("BILL-K", "2019-12-18"),
+    ]
+    .map(|(id, date)| bill_of(id, date, json!(null), "open"))
+    .to_vec()
+}
+
+/// What a list says is owed on each, by id.
+fn owed(v: &Value) -> Vec<(String, Value)> {
+    let row = |i: &Value| (i["id"].as_str().unwrap().to_string(), i["owes"].clone());
+    v["items"].as_array().unwrap().iter().map(row).collect()
+}
+
+/// Each payment's state is its status's, or its day's when it is after
+/// today; the export writes the settled ones and counts the rest by state.
+#[test]
+fn a_payment_is_settled_only_by_a_status_that_says_so() {
+    let bills = [
+        bill_of("BILL-H", "2022-08-20", json!(45908), "open"),
+        bill_of("BILL-I", "2020-08-26", json!(0), "closed"),
+        bill_of("BILL-J", "2023-06-14", json!(10636), "open"),
+        bill_of("BILL-K", "2019-12-18", json!(0), "voided"),
+    ];
+    let server = serve(accounts_of(&[("B", json!(56544), bills.to_vec(), payments_b())]), None);
+    let env = env(&server, "states");
+    let site = Site::open(&env, &adult1()).unwrap();
+    let v = readers::payments_list(&site, None, &RangeArgs::default()).unwrap();
+    assert_eq!(v["schema"], "payment-list/v2");
+    let rows: Vec<Value> = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            assert_eq!(p["settled"], p["state"] == "settled", "{p}");
+            json!([p["date"], p["status"], p["state"]])
+        })
+        .collect();
+    #[rustfmt::skip]
+    let want = json!([
+        ["2999-12-24", "Cancelled", "failed"],
+        ["2999-11-24", "Paid", "scheduled"],
+        ["2999-08-18", "Scheduled", "scheduled"],
+        ["2024-10-02", "Example word", "unconfirmed"],
+        ["2024-04-13", "Authorized", "pending"],
+        ["2023-02-12", "Posted", "settled"],
+        ["2022-03-09", "Voided", "failed"],
+        ["2022-02-11", null, "unconfirmed"],
+        ["2021-05-21", "Settled", "settled"],
+        ["2021-04-30", "Paid", "settled"],
+        ["2019-07-29", "Refunded", "failed"],
+        ["2019-04-13", null, "unconfirmed"],
+        ["2019-02-12", "Processing", "pending"],
+        ["2019-02-07", "Charged Back", "failed"],
+        ["2019-01-17", "Declined", "failed"],
+    ]);
+    assert_eq!(json!(rows), want);
+
+    let mut out = Vec::new();
+    readers::export(&site, &server.base, &mut out, None, None, None).unwrap();
+    let (_, resources, trailer) = read_stream(&out);
+    let paid: Vec<&Value> = resources
+        .iter()
+        .filter(|r| r["resourceType"] == "PaymentReconciliation")
+        .map(|r| &r["paymentDate"])
+        .collect();
+    assert_eq!(paid, ["2023-02-12", "2021-05-21", "2021-04-30"]);
+    let skipped: Vec<(&str, &str)> = trailer
+        .skipped
+        .iter()
+        .map(|s| (s.code.as_str(), s.reason.as_str()))
+        .collect();
+    assert_eq!(
+        skipped,
+        [(
+            "not_settled",
+            "5 payment(s) turned down (declined, failed, voided), 4 scheduled or pending and 3 not shown to have \
+             settled were left out"
+        )]
+    );
+    assert!(env.warnings.lines().is_empty(), "{:?}", env.warnings.lines());
+}
+
+/// The bills that say what is due on them account for the account's standing
+/// amount, so the others are owed 0. A voided bill is neither open nor owed,
+/// whatever it says.
+#[test]
+fn bills_that_do_not_say_are_owed_0_when_the_rest_account_for_the_account() {
+    let server = serve(accounts_of(&[("A", json!(24260), bills_a(), payments_a())]), None);
+    let env = env(&server, "settled-by-standing");
+    let site = Site::open(&env, &adult1()).unwrap();
+    let a = &readers::accounts_list(&site).unwrap()["items"][0];
+    assert_eq!((a["owes"].as_str(), a["bills"].as_u64()), (Some("242.60"), Some(7)));
+    assert_eq!(a["open_bills"], 2);
+    let bills = readers::bills_list(&site, None, false, &RangeArgs::default()).unwrap();
+    assert_eq!(
+        json!(owed(&bills)),
+        json!([
+            ["BILL-A", "188.69"],
+            ["BILL-F", "53.91"],
+            ["BILL-D", "0.00"],
+            ["BILL-E", "0.00"],
+            ["BILL-C", "639.86"],
+            ["BILL-G", null],
+            ["BILL-B", "0.00"],
+        ])
+    );
+    for b in bills["items"].as_array().unwrap() {
+        assert_eq!(b["open"], b["id"] == "BILL-A" || b["id"] == "BILL-F", "{b}");
+    }
+    let open = readers::bills_list(&site, None, true, &RangeArgs::default()).unwrap();
+    assert_eq!(ids(&open, "id"), ["BILL-A", "BILL-F"]);
+    let shown = readers::bill_show(&site, "BILL-E", None).unwrap();
+    assert_eq!(
+        (&shown["owes"], &shown["totals"]["owes"]),
+        (&json!("0.00"), &json!("0.00"))
+    );
+    assert_eq!(readers::bill_show(&site, "BILL-C", None).unwrap()["open"], false);
+
+    let mut out = Vec::new();
+    readers::export(&site, &server.base, &mut out, None, None, None).unwrap();
+    let (_, resources, trailer) = read_stream(&out);
+    let invoices: Vec<Value> = resources
+        .iter()
+        .filter(|r| r["resourceType"] == "Invoice")
+        .map(|i| json!([i["identifier"][0]["value"], i["status"]]))
+        .collect();
+    assert_eq!(
+        json!(invoices),
+        json!([
+            ["BILL-A", "issued"],
+            ["BILL-F", "issued"],
+            ["BILL-D", "balanced"],
+            ["BILL-E", "balanced"],
+            ["BILL-C", "cancelled"],
+            ["BILL-G", "cancelled"],
+            ["BILL-B", "balanced"],
+        ])
+    );
+    assert!(!trailer.skipped.iter().any(|s| s.code == "unreadable"));
+    assert!(env.warnings.lines().is_empty(), "{:?}", env.warnings.lines());
+}
+
+/// Otherwise they stay unsaid, a cent off included: `null` and one warning,
+/// without a figure, and a skip in place of each one's Invoice.
+#[test]
+fn bills_that_do_not_say_stay_unsaid_unless_the_rest_account_for_the_account() {
+    for standing in [
+        json!(24261),
+        json!(24259),
+        // With what the voided bill says.
+        json!(88246),
+        json!(47870),
+        json!(0),
+        json!(-4335),
+        json!(null),
+    ] {
+        let server = serve(accounts_of(&[("A", standing.clone(), bills_a(), payments_a())]), None);
+        let env = env(&server, "unsaid");
+        let site = Site::open(&env, &adult1()).unwrap();
+        let warned = || env.warnings.lines().len();
+        let a = &readers::accounts_list(&site).unwrap()["items"][0];
+        // The account's total is the portal's own, whatever its bills say.
+        let total = standing
+            .as_i64()
+            .map(|c| format!("{}{}.{:02}", if c < 0 { "-" } else { "" }, c.abs() / 100, c.abs() % 100));
+        assert_eq!((&a["owes"], &a["open_bills"]), (&json!(total), &json!(2)), "{standing}");
+        assert_eq!(warned(), 1);
+        let bills = readers::bills_list(&site, None, false, &RangeArgs::default()).unwrap();
+        assert_eq!(
+            json!(owed(&bills)),
+            json!([
+                ["BILL-A", "188.69"],
+                ["BILL-F", "53.91"],
+                ["BILL-D", null],
+                ["BILL-E", null],
+                ["BILL-C", "639.86"],
+                ["BILL-G", null],
+                ["BILL-B", "0.00"],
+            ]),
+            "{standing}"
+        );
+        assert_eq!(warned(), 2);
+        let open = readers::bills_list(&site, None, true, &RangeArgs::default()).unwrap();
+        assert_eq!(ids(&open, "id"), ["BILL-A", "BILL-F"], "{standing}");
+        assert_eq!(warned(), 3, "the list that leaves them out says so too");
+        for id in ["BILL-D", "BILL-E"] {
+            let shown = readers::bill_show(&site, id, None).unwrap();
+            assert_eq!((&shown["owes"], &shown["open"]), (&json!(null), &json!(false)), "{id}");
+            assert!(shown["totals"]["owes"].is_null(), "{id}");
+        }
+        assert_eq!(warned(), 5);
+        // A bill that says, and a voided one, are known.
+        for id in ["BILL-A", "BILL-C", "BILL-G"] {
+            readers::bill_show(&site, id, None).unwrap();
+        }
+        assert_eq!(warned(), 5);
+        for w in env.warnings.lines() {
+            assert!(w.starts_with("2 bill(s) do not say what is owed on them"), "{w}");
+            assert_eq!(w.chars().filter(char::is_ascii_digit).count(), 1, "no figures: {w}");
+        }
+
+        let mut out = Vec::new();
+        let finished = readers::export(&site, &server.base, &mut out, None, None, None).unwrap();
+        assert!(finished.trailer.complete);
+        let (_, resources, trailer) = read_stream(&out);
+        let invoices: Vec<Value> = resources
+            .iter()
+            .filter(|r| r["resourceType"] == "Invoice")
+            .map(|i| json!([i["identifier"][0]["value"], i["status"], i.get("totalNet").is_some()]))
+            .collect();
+        assert_eq!(
+            json!(invoices),
+            json!([
+                ["BILL-A", "issued", true],
+                ["BILL-F", "issued", true],
+                ["BILL-C", "cancelled", true],
+                ["BILL-G", "cancelled", false],
+                ["BILL-B", "balanced", true],
+            ])
+        );
+        let skipped: Vec<(Option<&str>, Option<&str>, &str)> = trailer
+            .skipped
+            .iter()
+            .filter(|s| s.code == "unreadable")
+            .map(|s| (s.resource_type.as_deref(), s.id.as_deref(), s.reason.as_str()))
+            .collect();
+        let why = "the bill does not say what is owed on it";
+        assert_eq!(
+            skipped,
+            [
+                (Some("Invoice"), Some("bill-ACCT-A-BILL-D"), why),
+                (Some("Invoice"), Some("bill-ACCT-A-BILL-E"), why),
+            ]
+        );
+        assert_eq!(trailer.skipped.len(), 3, "and the payments that did not settle");
+    }
+}
+
+/// `--since` leaves out a bill before its day, said or not.
+#[test]
+fn a_bill_that_does_not_say_before_since_is_no_skip() {
+    let server = serve(accounts_of(&[("A", json!(null), bills_a(), payments_a())]), None);
+    let env = env(&server, "unsaid-since");
+    let site = Site::open(&env, &adult1()).unwrap();
+    let mut out = Vec::new();
+    readers::export(&site, &server.base, &mut out, None, None, Some("2021-12-30")).unwrap();
+    let (_, resources, trailer) = read_stream(&out);
+    let count = resources.iter().filter(|r| r["resourceType"] == "Invoice").count();
+    assert_eq!(count, 2);
+    let skipped: Vec<Option<&str>> = trailer
+        .skipped
+        .iter()
+        .filter(|s| s.resource_type.as_deref() == Some("Invoice"))
+        .map(|s| s.id.as_deref())
+        .collect();
+    assert_eq!(skipped, [Some("bill-ACCT-A-BILL-D")]);
+}
+
+/// Each account is settled, or warned about, by its own standing amount. An
+/// account none of whose bills says owes nothing on any when it owes nothing.
+#[test]
+fn each_account_s_bills_are_settled_by_its_own_standing_amount() {
+    let nothing: [(&str, Value); 4] = ["BILL-J", "BILL-H", "BILL-I", "BILL-K"].map(|id| (id, json!("0.00")));
+    let unsaid: [(&str, Value); 4] = ["BILL-J", "BILL-H", "BILL-I", "BILL-K"].map(|id| (id, json!(null)));
+    for (standing, owes, listed, warnings) in [
+        (json!(0), json!("0.00"), &nothing, &["2 bill(s)"][..]),
+        (json!(39401), json!("394.01"), &unsaid, &["2 bill(s)", "4 bill(s)"]),
+        (json!(null), json!(null), &unsaid, &["2 bill(s)", "4 bill(s)"]),
+    ] {
+        let server = serve(
+            accounts_of(&[
+                ("A", json!(59216), bills_a(), payments_a()),
+                ("B", standing.clone(), bills_b(), payments_b()),
+            ]),
+            None,
+        );
+        let env = env(&server, "unsaid-accounts");
+        let site = Site::open(&env, &adult1()).unwrap();
+        let accounts = readers::accounts_list(&site).unwrap();
+        assert_eq!(
+            json!(owed(&accounts)),
+            json!([["PAY-A", "592.16"], ["PAY-B", owes]]),
+            "{standing}"
+        );
+        let said: Vec<String> = env
+            .warnings
+            .lines()
+            .iter()
+            .map(|w| w.split(" do not say what is owed on them").next().unwrap().to_string())
+            .collect();
+        assert_eq!(said, warnings, "one for each account: {standing}");
+        // `--account` reads, and warns of, the one it names.
+        let one = readers::bills_list(&site, Some("ACCT-B"), false, &RangeArgs::default()).unwrap();
+        assert_eq!(json!(owed(&one)), json!(listed), "{standing}");
+        assert_eq!(env.warnings.lines().len(), 2 * warnings.len() - 1);
+        for b in one["items"].as_array().unwrap() {
+            assert_eq!(b["open"], false, "{b}");
+        }
+    }
 }
 
 #[test]

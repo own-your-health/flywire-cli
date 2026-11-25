@@ -122,12 +122,35 @@ How the answers are read (`src/reads.rs`):
 - A missing or `null` field is absent from the output. An account, bill or
   statement without its `id` is left out.
 - A numeric CPT or revenue code is padded to 5 or 4 digits.
-- `bills list --open` is a bill with `amountDue` above 0. A bill is voided
-  when its `status` contains `void` or `cancel`.
-- A payment is settled unless its `status` says scheduled, cancelled,
-  voided, failed, bounced, returned, charged back, declined, pending or
-  refunded. `payments list` shows every payment with `settled`; `records
-  export` writes only the settled ones and counts the rest in one skip.
+- `bills list --open` is a bill with `amountDue` above 0 that is not voided.
+  A bill is voided when its `status` is exactly `void`, `voided`,
+  `cancelled` or `canceled`, in any case; a status that only mentions it
+  (`cancellation requested`) leaves the bill owed.
+- A bill without `amountDue` does not say what is owed on it. When the
+  bills of its account that say (voided ones left out) add up to the
+  account's `standingAmount`, nothing is owed on the ones that do not.
+  Otherwise `accounts list`, `bills list` and `bills show` warn with how
+  many do not say, the bills' `owes` is null and `records export` skips
+  each (`unreadable`) instead of writing an Invoice without a total. The
+  account's own `owes` is `standingAmount` either way.
+- A payment is settled only on positive evidence
+  (`PortalPayment::settlement`). The states are decided in this order, from
+  its `status` in any case:
+  1. `failed`: it says declined, denied, failed, rejected, voided, expired,
+     cancelled, returned, bounced, charged back, error, unauthorized or
+     refunded, its words joined in whatever way (`charge-back`,
+     `Charged_Back`). This outranks a date after today.
+  2. `scheduled`: it says scheduled, or the payment's date is after the
+     local day, whatever its status says.
+  3. `pending`: it says pending, submitted, settling, processing, awaiting,
+     hold, authorized, initiated, queued, unsettled or partial.
+  4. `settled`: it is exactly paid, settled, complete, completed, captured,
+     posted, success, succeeded or successful.
+  5. `unconfirmed`: anything else, a missing status included.
+  `payments list` shows each with `settled` (true only for the `settled`
+  state) and `state`, which is the one to read. `records export` writes
+  only the settled payments and counts the rest in one `not_settled` skip
+  per account, by state.
 - `documents list` lists only the statements the app shows: those with
   both `statementUniqueId` and `paperUploadedAt`.
 

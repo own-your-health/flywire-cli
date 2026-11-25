@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- A payment is settled only on positive evidence. One with no status, a
+  status this reader does not know, a charge-back however it is spelled, or
+  a date after today was `settled: true` and exported as paid; it is now
+  `unconfirmed`, `failed` or `scheduled`. `payments list` is
+  `payment-list/v2`: it gains `state`, and `settled` is true only for the
+  `settled` state. The export counts the rest by state.
+- A voided bill is not open and not owed, whatever `amountDue` it gives,
+  and only an exact `void`, `voided`, `cancelled` or `canceled` status
+  voids one. So `open` (`bills list`, `bills show`), `open_bills`
+  (`accounts list`) and `bills list --open` leave voided bills out. Their
+  meaning, still owed on, and their schema ids are unchanged, and no release
+  carries the old answer.
+- A bill without `amountDue` is owed 0 when the account's other bills
+  account for its `standingAmount`. Otherwise the listings warn, and
+  `records export` skips it instead of writing an open Invoice without a
+  total.
 - While `FLYWIRE_KEYCHAIN_SERVICE` names a test's keychain service, a command
   that would send a request without a loopback `FLYWIRE_BASE_URL` is exit 2
   before sending it, so a test run never reaches the real portal.

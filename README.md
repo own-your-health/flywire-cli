@@ -96,7 +96,7 @@ ended it, a read exits 3 and prints the command that signs in again:
 | `accounts list` | `account-list/v1`: each account's number, provider, what is owed, bills and open bills |
 | `bills list [--open] [--account <ID>] [--since\|--until <DAY>] [--limit <N>]` | `bill-list/v1`: newest service first, open and closed |
 | `bills show <ID>` | `bill/v1`: the bill's totals (billed, insurance paid and adjusted, patient paid, owed), the plans that covered it and its charges with their CPT or revenue codes |
-| `payments list [--account <ID>] [--since\|--until <DAY>]` | `payment-list/v1`: amount, date, method, status and whether it settled |
+| `payments list [--account <ID>] [--since\|--until <DAY>]` | `payment-list/v2`: amount, date, method, status and where each stands: settled, scheduled, pending, failed or unconfirmed; a payment counts as paid only on a status that says so |
 | `documents list` | `document-list/v1`: past statements with a file |
 | `documents download <ID>\|--all -o <DIR>` | `document-download/v1`, `document-download-batch/v1`: the statement's file, owner-only; `-o -` writes it to stdout |
 | `records export (--ndjson\|-o <DIR>) [--patient <ID>] [--org <ORG>] [--since <DAY>]` | `records-stream/v1`: FHIR R4 Invoices with their charges, payments and statements (`docs/fhir.md`); `-o` writes `DIR/records.ndjson`, against a test's server only |

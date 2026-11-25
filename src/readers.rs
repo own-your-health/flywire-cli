@@ -27,7 +27,7 @@ use serde_json::{json, Value};
 use crate::bill::{self, id_of, Cents, Mapper};
 use crate::cli::{DownloadArgs, BIN};
 use crate::portal::{now_rfc3339, Site};
-use crate::reads::{self, PortalAccount, PortalBill, PortalStatement};
+use crate::reads::{self, PortalAccount, PortalBill, PortalStatement, Settlement};
 
 /// `meta.source` on every resource flywire maps.
 pub const META_SOURCE: &str = "flywire:site";
@@ -45,7 +45,8 @@ pub struct Book {
 
 /// The accounts, and the ids the resources carry but the patient's.
 pub fn book(site: &Site) -> Result<Book, CliError> {
-    let accounts = site.accounts()?;
+    let mut accounts = site.accounts()?;
+    accounts.iter_mut().for_each(settle_by_standing);
     let provider = site.provider().as_str().to_string();
     let organization_name = accounts
         .iter()
@@ -64,6 +65,42 @@ pub fn book(site: &Site) -> Result<Book, CliError> {
             organization_name,
         },
     })
+}
+
+/// `amountDue` is optional, and nothing else in a bill's row says what is
+/// owed on it. When the bills that give one (voided ones left out) add up to
+/// the account's `standingAmount`, they account for all that is owed, and
+/// each bill that gives none is owed 0. Otherwise what is owed on those is
+/// not known, and is left unsaid.
+fn settle_by_standing(a: &mut PortalAccount) {
+    let said: i64 = a
+        .bills
+        .iter()
+        .filter(|b| !b.is_voided())
+        .filter_map(|b| b.amount_due)
+        .map(|c| c.0)
+        .sum();
+    if a.standing != Some(Cents(said)) {
+        return;
+    }
+    for b in a.bills.iter_mut().filter(|b| b.is_unsaid()) {
+        b.amount_due = Some(Cents(0));
+    }
+}
+
+/// How many of an account's bills do not say what is owed on them.
+fn unsaid(a: &PortalAccount) -> usize {
+    a.bills.iter().filter(|b| b.is_unsaid()).count()
+}
+
+/// A warning for an account with bills that do not say what is owed on them.
+fn warn_unsaid(site: &Site, a: &PortalAccount) {
+    let n = unsaid(a);
+    if n > 0 {
+        site.warn(format!(
+            "{n} bill(s) do not say what is owed on them, and what their account shows owed does not settle it"
+        ));
+    }
 }
 
 /// FNV-1a, 64-bit: a stable hash with no dependency, for ids only.
@@ -202,9 +239,11 @@ pub fn patients(site: &Site) -> Result<Value, CliError> {
 
 // ------------------------------------------------------------- accounts
 
-/// `accounts list` (account-list/v1).
+/// `accounts list` (account-list/v1). What is owed on an account is the
+/// portal's own total, which a bill that does not say leaves as it is.
 pub fn accounts_list(site: &Site) -> Result<Value, CliError> {
     let book = book(site)?;
+    book.accounts.iter().for_each(|a| warn_unsaid(site, a));
     let items = book
         .accounts
         .iter()
@@ -246,8 +285,9 @@ fn bill_row(a: &PortalAccount, b: &PortalBill) -> Value {
 pub fn bills_list(site: &Site, account: Option<&str>, open: bool, range: &RangeArgs) -> Result<Value, CliError> {
     let range = &padded(range)?;
     let book = book(site)?;
-    let mut rows: Vec<(&PortalAccount, &PortalBill)> = book
-        .select(account)?
+    let accounts = book.select(account)?;
+    accounts.iter().for_each(|a| warn_unsaid(site, a));
+    let mut rows: Vec<(&PortalAccount, &PortalBill)> = accounts
         .into_iter()
         .flat_map(|a| a.bills.iter().map(move |b| (a, b)))
         .filter(|(_, b)| !open || b.is_open())
@@ -273,6 +313,9 @@ pub fn bill_show(site: &Site, id: &str, account: Option<&str>) -> Result<Value, 
             .with_remedy(format!("`{BIN} bills list --profile <NAME>` lists them")));
     };
     let d = site.bill_detail(&b.id)?;
+    if b.is_unsaid() {
+        warn_unsaid(site, a);
+    }
     let mut v = json!({ "schema": "bill/v1" });
     if let (Some(doc), Value::Object(row)) = (v.as_object_mut(), bill_row(a, b)) {
         doc.extend(row);
@@ -321,7 +364,14 @@ pub const CHARGE_COLUMNS: &[&str] = &["date", "code", "description", "amount"];
 
 // ------------------------------------------------------------- payments
 
-/// `payments list` (payment-list/v1): newest first, settled or not.
+/// The local day, which a payment cannot have settled after.
+fn today() -> String {
+    pk_cli_core::dates::fmt_iso(pk_cli_core::dates::today_local())
+}
+
+/// `payments list` (payment-list/v2): newest first, with where each stands:
+/// `settled` only when the portal's status says the money moved, `scheduled`
+/// for a date after today too, `pending`, `failed`, or `unconfirmed`.
 pub fn payments_list(site: &Site, account: Option<&str>, range: &RangeArgs) -> Result<Value, CliError> {
     let range = &padded(range)?;
     let book = book(site)?;
@@ -334,6 +384,7 @@ pub fn payments_list(site: &Site, account: Option<&str>, range: &RangeArgs) -> R
         }
     }
     rows.sort_by(|x, y| y.date.cmp(&x.date));
+    let today = today();
     let items = rows
         .iter()
         .map(|p| {
@@ -343,14 +394,18 @@ pub fn payments_list(site: &Site, account: Option<&str>, range: &RangeArgs) -> R
                 "amount": money(p.amount),
                 "method": p.method,
                 "status": p.status,
-                "settled": p.is_settled(),
+                "settled": p.is_settled(&today),
+                "state": p.settlement(&today).as_str(),
             })
         })
         .collect();
-    Ok(list("payment", limited(items, range)))
+    // v2: `settled` is true only for the settled state, and `state` is new.
+    let mut v = list("payment", limited(items, range));
+    v["schema"] = "payment-list/v2".into();
+    Ok(v)
 }
 
-pub const PAYMENT_COLUMNS: &[&str] = &["date", "account", "amount", "method", "status"];
+pub const PAYMENT_COLUMNS: &[&str] = &["date", "account", "amount", "method", "status", "settled", "state"];
 
 // ------------------------------------------------------------ documents
 
@@ -626,6 +681,10 @@ fn or_skip<T, W: Write>(
 /// accounts are read, so a refused session is an ordinary error; once the
 /// header is out, one item the portal fails on is a skip ([`or_skip`]) and
 /// a session that ends ends the stream with an incomplete trailer.
+///
+/// A bill that does not say what is owed on it is a skip, voided ones aside:
+/// a store sums the open Invoices, and would read one without a total as
+/// open for nothing.
 pub fn export<W: Write>(
     site: &Site,
     origin: &str,
@@ -672,7 +731,7 @@ pub fn export<W: Write>(
                 let Some(model) = reads::bill(a, b, Some(&d)) else {
                     w.skip(Skip::resource(
                         "Invoice",
-                        m.bill_id(&a.number, &b.id),
+                        id,
                         "unreadable",
                         "the bill came with no date of service",
                     ));
@@ -681,13 +740,24 @@ pub fn export<W: Write>(
                 if since.is_some_and(|s| model.service_start.as_str() < s) {
                     continue;
                 }
+                if b.is_unsaid() {
+                    w.skip(Skip::resource(
+                        "Invoice",
+                        id,
+                        "unreadable",
+                        "the bill does not say what is owed on it",
+                    ));
+                    continue;
+                }
                 let v = invoice(&book, &model, d.visit_number.as_deref(), b.claim.as_deref(), &now);
                 w.resource(&RawResource::from_value(&v)?)?;
             }
         }
+        // Only a settled payment is a payment made: a scheduled, pending,
+        // failed or unconfirmed one is counted, never written as paid.
+        let today = today();
         for a in &book.accounts {
-            let mut unsettled = 0;
-            let mut undated = 0;
+            let (mut failed, mut waiting, mut unconfirmed, mut undated) = (0, 0, 0, 0);
             let mut seen: BTreeMap<(String, i64), usize> = BTreeMap::new();
             let Some(payments) = or_skip(
                 &mut w,
@@ -700,9 +770,20 @@ pub fn export<W: Write>(
                 continue;
             };
             for p in payments {
-                if !p.is_settled() {
-                    unsettled += 1;
-                    continue;
+                match p.settlement(&today) {
+                    Settlement::Settled => {}
+                    Settlement::Failed => {
+                        failed += 1;
+                        continue;
+                    }
+                    Settlement::Scheduled | Settlement::Pending => {
+                        waiting += 1;
+                        continue;
+                    }
+                    Settlement::Unconfirmed => {
+                        unconfirmed += 1;
+                        continue;
+                    }
                 }
                 let Some(model) = reads::payment(&p) else {
                     undated += 1;
@@ -716,12 +797,15 @@ pub fn export<W: Write>(
                 *n += 1;
                 w.resource(&RawResource::from_value(&v)?)?;
             }
-            if unsettled > 0 {
+            if failed + waiting + unconfirmed > 0 {
                 w.skip(Skip::resource(
                     "PaymentReconciliation",
                     "",
                     "not_settled",
-                    format!("{unsettled} payment(s) the portal shows as not settled (scheduled, cancelled, returned) were left out"),
+                    format!(
+                        "{failed} payment(s) turned down (declined, failed, voided), {waiting} scheduled or pending \
+                         and {unconfirmed} not shown to have settled were left out"
+                    ),
                 ));
             }
             if undated > 0 {
